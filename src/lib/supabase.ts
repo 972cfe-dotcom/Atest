@@ -20,12 +20,9 @@ export function createSupabaseClient() {
 
 // Server-side Supabase client (Cloudflare Workers)
 export function createServerSupabaseClient(env: any) {
-  const supabaseUrl = env.SUPABASE_URL
-  const supabaseAnonKey = env.SUPABASE_ANON_KEY
-
-  if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error('Supabase environment variables not configured')
-  }
+  // Hardcoded credentials for Cloudflare deployment
+  const supabaseUrl = 'https://dmnxblcdaqnenggfyurw.supabase.co'
+  const supabaseAnonKey = 'sb_publishable_B5zKNJ_dI1254sPk4Yt0hQ_p-3qdaRe'
 
   return createClient(supabaseUrl, supabaseAnonKey)
 }

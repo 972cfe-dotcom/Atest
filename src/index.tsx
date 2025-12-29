@@ -155,8 +155,9 @@ app.post('/api/documents', async (c) => {
 
 // Main HTML page with inline React app
 app.get('*', (c) => {
-  const supabaseUrl = c.env.SUPABASE_URL || ''
-  const supabaseAnonKey = c.env.SUPABASE_ANON_KEY || ''
+  // Hardcoded Supabase credentials for Cloudflare deployment
+  const supabaseUrl = 'https://dmnxblcdaqnenggfyurw.supabase.co'
+  const supabaseAnonKey = 'sb_publishable_B5zKNJ_dI1254sPk4Yt0hQ_p-3qdaRe'
 
   return c.html(`
     <!DOCTYPE html>
@@ -184,7 +185,7 @@ app.get('*', (c) => {
           const { useState, useEffect, createElement: h } = React;
           const { createClient } = supabase;
           
-          // Create Supabase client
+          // Create Supabase client with hardcoded credentials
           const supabaseClient = createClient(window.__SUPABASE_URL__, window.__SUPABASE_ANON_KEY__);
           
           // Landing Page Component
