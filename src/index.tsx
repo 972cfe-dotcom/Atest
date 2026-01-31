@@ -196,50 +196,109 @@ app.get('/api/invoices', async (c) => {
   }
 })
 
-// Upload and process invoice - CLOUDFLARE WORKERS COMPATIBLE
+// Upload and process invoice - REAL FILE UPLOAD TO STORAGE
 app.post('/api/invoices/upload', async (c) => {
   try {
-    console.log('[Invoice Upload] Step 1: Starting')
+    console.log('[Invoice Upload] Step 1: Starting REAL file upload')
     
-    console.log('[Invoice Upload] Step 2: Parsing body')
+    console.log('[Invoice Upload] Step 2: Parsing JSON body')
     const body = await c.req.json()
     const fileName = body.fileName || 'invoice.pdf'
-    const userId = body.userId  // CRITICAL: Get userId from request body
+    const userId = body.userId
+    const fileData = body.fileData  // base64 data URL
     
     console.log('[Invoice Upload] Step 3: User ID from request:', userId)
+    console.log('[Invoice Upload] File name:', fileName)
+    console.log('[Invoice Upload] File data type:', typeof fileData)
     
     if (!userId) {
       console.error('[Invoice Upload] No userId in request body')
       return c.json({ error: 'User ID is required' }, 400)
     }
     
+    if (!fileData) {
+      console.error('[Invoice Upload] No file data in request body')
+      return c.json({ error: 'File data is required' }, 400)
+    }
+    
     console.log('[Invoice Upload] Step 4: Creating Supabase client with SERVICE ROLE KEY')
-    // HARDCODED SERVICE ROLE KEY - Bypasses RLS for insert
     const supabaseUrl = 'https://dmnxblcdaqnenggfyurw.supabase.co'
     const supabaseServiceKey = 'sb_secret_ZpY2INapqj8cym1xdRjYGA_CJiBL0Eh'
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
     console.log('[Invoice Upload] Service role client created')
 
-    // Mock file URL (no actual storage upload needed)
-    const timestamp = Date.now()
-    const mockFileUrl = `https://dmnxblcdaqnenggfyurw.supabase.co/storage/v1/object/public/invoices/${userId}/${timestamp}_${fileName}`
+    // Convert base64 data URL to ArrayBuffer for Cloudflare Workers
+    console.log('[Invoice Upload] Step 5: Converting base64 to ArrayBuffer')
+    
+    // Extract base64 data from data URL (e.g., "data:image/png;base64,...")
+    const base64Data = fileData.split(',')[1]
+    if (!base64Data) {
+      console.error('[Invoice Upload] Invalid file data format')
+      return c.json({ error: 'Invalid file data format' }, 400)
+    }
+    
+    // Decode base64 to binary string
+    const binaryString = atob(base64Data)
+    const bytes = new Uint8Array(binaryString.length)
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i)
+    }
+    
+    console.log('[Invoice Upload] File size:', bytes.length, 'bytes')
+    
+    // Get content type from data URL
+    const contentTypeMatch = fileData.match(/data:([^;]+);/)
+    const contentType = contentTypeMatch ? contentTypeMatch[1] : 'application/octet-stream'
+    console.log('[Invoice Upload] Content type:', contentType)
 
-    console.log('[Invoice Upload] Step 5: Generating mock invoice data')
-    // Mock AI extraction - pure JavaScript, no external modules
+    // Upload to Supabase Storage
+    console.log('[Invoice Upload] Step 6: Uploading to Supabase Storage')
+    const timestamp = Date.now()
+    const storagePath = `${userId}/${timestamp}_${fileName}`
+    console.log('[Invoice Upload] Storage path:', storagePath)
+    
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from('invoices')
+      .upload(storagePath, bytes, {
+        contentType: contentType,
+        upsert: false
+      })
+    
+    if (uploadError) {
+      console.error('[Invoice Upload] Storage upload failed:', uploadError)
+      console.error('[Invoice Upload] Upload error details:', {
+        message: uploadError.message,
+        statusCode: uploadError.statusCode
+      })
+      return c.json({ 
+        error: 'Storage upload failed', 
+        details: uploadError.message
+      }, 500)
+    }
+    
+    console.log('[Invoice Upload] Storage upload success:', uploadData.path)
+    
+    // Construct public URL
+    const publicUrl = `${supabaseUrl}/storage/v1/object/public/invoices/${storagePath}`
+    console.log('[Invoice Upload] Step 7: Public URL:', publicUrl)
+
+    // Mock AI extraction
+    console.log('[Invoice Upload] Step 8: Generating mock invoice data')
     const suppliers = ['Google', 'Amazon', 'Bezeq']
     const supplier_name = suppliers[Math.floor(Math.random() * suppliers.length)]
     const total_amount = parseFloat((Math.random() * 4850 + 150).toFixed(2))
     
-    console.log('[Invoice Upload] Step 6: Mock extraction result:', { supplier_name, total_amount })
+    console.log('[Invoice Upload] Mock extraction result:', { supplier_name, total_amount })
 
-    console.log('[Invoice Upload] Step 7: Inserting into database with explicit user_id')
+    // Insert into database with REAL file URL
+    console.log('[Invoice Upload] Step 9: Inserting into database with REAL file URL')
     const { data: invoice, error: insertError } = await supabase
       .from('invoices')
       .insert({
-        user_id: userId,  // CRITICAL: Use userId from request body
+        user_id: userId,
         supplier_name: supplier_name,
         total_amount: total_amount,
-        file_url: mockFileUrl,
+        file_url: publicUrl,  // REAL URL from storage
         status: 'processed'
       })
       .select()
@@ -256,15 +315,17 @@ app.post('/api/invoices/upload', async (c) => {
       return c.json({ 
         error: 'Database insert failed', 
         details: insertError.message,
-        code: insertError.code,
-        hint: insertError.hint
+        code: insertError.code
       }, 500)
     }
 
-    console.log('[Invoice Upload] Step 8: SUCCESS! Invoice created:', invoice.id)
+    console.log('[Invoice Upload] Step 10: SUCCESS! Invoice created:', invoice.id)
+    console.log('[Invoice Upload] File URL in database:', invoice.file_url)
+    
     return c.json({ 
       success: true,
-      invoice: invoice 
+      invoice: invoice,
+      storageUrl: publicUrl
     })
     
   } catch (error: any) {
