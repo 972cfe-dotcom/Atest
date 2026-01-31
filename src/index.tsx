@@ -23,8 +23,8 @@ app.post('/api/process-ocr', async (c) => {
       return c.json({ error: 'Document ID is required' }, 400)
     }
 
-    // Create Supabase client
-    const supabase = createServerSupabaseClient(c.env)
+    // Create Supabase client - no env needed
+    const supabase = createServerSupabaseClient()
 
     // Verify document exists and is pending
     const { data: document, error: fetchError } = await supabase
@@ -77,7 +77,7 @@ app.get('/api/documents', async (c) => {
       return c.json({ error: 'Unauthorized' }, 401)
     }
 
-    const supabase = createServerSupabaseClient(c.env)
+    const supabase = createServerSupabaseClient()
     
     // Get user from auth header
     const { data: { user }, error: authError } = await supabase.auth.getUser(
@@ -166,7 +166,8 @@ app.get('/api/invoices', async (c) => {
       return c.json({ error: 'Unauthorized' }, 401)
     }
 
-    const supabase = createServerSupabaseClient(c.env)
+    // No env needed - hardcoded credentials
+    const supabase = createServerSupabaseClient()
     
     const { data: { user }, error: authError } = await supabase.auth.getUser(
       authHeader.replace('Bearer ', '')
@@ -183,51 +184,62 @@ app.get('/api/invoices', async (c) => {
       .order('created_at', { ascending: false })
 
     if (fetchError) {
-      return c.json({ error: 'Failed to fetch invoices' }, 500)
+      console.error('[Get Invoices] Error:', fetchError)
+      return c.json({ error: 'Failed to fetch invoices', details: fetchError.message }, 500)
     }
 
     return c.json({ invoices })
-  } catch (error) {
-    console.error('Fetch invoices error:', error)
-    return c.json({ error: 'Internal server error' }, 500)
+  } catch (error: any) {
+    console.error('[Get Invoices] Critical error:', error)
+    return c.json({ error: 'Internal server error', details: error.message }, 500)
   }
 })
 
 // Upload and process invoice
 app.post('/api/invoices/upload', async (c) => {
   try {
+    // Log for debugging
+    console.log('[Invoice Upload] Starting upload process')
+    
     const authHeader = c.req.header('Authorization')
     if (!authHeader) {
+      console.log('[Invoice Upload] No auth header')
       return c.json({ error: 'Unauthorized' }, 401)
     }
 
+    console.log('[Invoice Upload] Parsing request body')
     const { fileName, fileData } = await c.req.json()
 
     if (!fileName || !fileData) {
+      console.log('[Invoice Upload] Missing file data')
       return c.json({ error: 'File name and data are required' }, 400)
     }
 
-    const supabase = createServerSupabaseClient(c.env)
+    console.log('[Invoice Upload] Creating Supabase client')
+    // No env needed - hardcoded credentials
+    const supabase = createServerSupabaseClient()
 
+    console.log('[Invoice Upload] Verifying user auth')
     const { data: { user }, error: authError } = await supabase.auth.getUser(
       authHeader.replace('Bearer ', '')
     )
 
     if (authError || !user) {
-      return c.json({ error: 'Unauthorized' }, 401)
+      console.log('[Invoice Upload] Auth error:', authError)
+      return c.json({ error: 'Unauthorized', details: authError?.message }, 401)
     }
 
-    // For now, we'll store a mock file URL
-    // In production, upload to Supabase Storage:
-    // const { data: uploadData, error: uploadError } = await supabase.storage
-    //   .from('invoices')
-    //   .upload(`${user.id}/${Date.now()}_${fileName}`, fileData)
-    
+    console.log('[Invoice Upload] User authenticated:', user.id)
+
+    // Generate mock file URL (no actual file upload needed for demo)
     const mockFileUrl = `https://dmnxblcdaqnenggfyurw.supabase.co/storage/v1/object/public/invoices/${user.id}/${Date.now()}_${fileName}`
 
+    console.log('[Invoice Upload] Extracting invoice data')
     // Extract invoice data using AI (currently mock)
     const extractedData = await extractInvoiceData(mockFileUrl)
+    console.log('[Invoice Upload] Extracted:', extractedData)
 
+    console.log('[Invoice Upload] Saving to database')
     // Save to database
     const { data: invoice, error: insertError } = await supabase
       .from('invoices')
@@ -242,13 +254,22 @@ app.post('/api/invoices/upload', async (c) => {
       .single()
 
     if (insertError) {
-      return c.json({ error: 'Failed to save invoice' }, 500)
+      console.log('[Invoice Upload] Database error:', insertError)
+      return c.json({ 
+        error: 'Failed to save invoice', 
+        details: insertError.message 
+      }, 500)
     }
 
+    console.log('[Invoice Upload] Success! Invoice ID:', invoice.id)
     return c.json({ invoice })
-  } catch (error) {
-    console.error('Invoice upload error:', error)
-    return c.json({ error: 'Internal server error' }, 500)
+  } catch (error: any) {
+    console.error('[Invoice Upload] Critical error:', error)
+    return c.json({ 
+      error: 'Internal server error', 
+      details: error.message || 'Unknown error',
+      stack: error.stack 
+    }, 500)
   }
 })
 
@@ -261,7 +282,8 @@ app.delete('/api/invoices/:id', async (c) => {
     }
 
     const invoiceId = c.req.param('id')
-    const supabase = createServerSupabaseClient(c.env)
+    // No env needed - hardcoded credentials
+    const supabase = createServerSupabaseClient()
 
     const { data: { user }, error: authError } = await supabase.auth.getUser(
       authHeader.replace('Bearer ', '')
@@ -278,13 +300,14 @@ app.delete('/api/invoices/:id', async (c) => {
       .eq('user_id', user.id)
 
     if (deleteError) {
-      return c.json({ error: 'Failed to delete invoice' }, 500)
+      console.error('[Delete Invoice] Error:', deleteError)
+      return c.json({ error: 'Failed to delete invoice', details: deleteError.message }, 500)
     }
 
     return c.json({ success: true })
-  } catch (error) {
-    console.error('Delete invoice error:', error)
-    return c.json({ error: 'Internal server error' }, 500)
+  } catch (error: any) {
+    console.error('[Delete Invoice] Critical error:', error)
+    return c.json({ error: 'Internal server error', details: error.message }, 500)
   }
 })
 
