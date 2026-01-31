@@ -9,6 +9,16 @@ export interface Document {
   updated_at?: string
 }
 
+export interface Invoice {
+  id: string
+  user_id: string
+  supplier_name: string
+  total_amount: number
+  file_url: string
+  status: string
+  created_at: string
+}
+
 export interface User {
   id: string
   email: string
