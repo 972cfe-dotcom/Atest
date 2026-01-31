@@ -19,7 +19,8 @@ export function createSupabaseClient() {
 }
 
 // Server-side Supabase client (Cloudflare Workers)
-export function createServerSupabaseClient(env: any) {
+// HARDCODED CREDENTIALS - No environment variables needed
+export function createServerSupabaseClient(env?: any) {
   // Hardcoded credentials for Cloudflare deployment
   const supabaseUrl = 'https://dmnxblcdaqnenggfyurw.supabase.co'
   const supabaseAnonKey = 'sb_publishable_B5zKNJ_dI1254sPk4Yt0hQ_p-3qdaRe'
