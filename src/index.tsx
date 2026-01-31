@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import { createClient } from '@supabase/supabase-js'
 import { createServerSupabaseClient } from './lib/supabase'
 import { extractInvoiceData } from './lib/invoiceExtraction'
 import type { Document, Invoice } from './types/database'
@@ -195,58 +196,57 @@ app.get('/api/invoices', async (c) => {
   }
 })
 
-// Upload and process invoice
+// Upload and process invoice - CLOUDFLARE WORKERS COMPATIBLE
 app.post('/api/invoices/upload', async (c) => {
   try {
-    // Log for debugging
-    console.log('[Invoice Upload] Starting upload process')
+    console.log('[Invoice Upload] Step 1: Starting')
     
+    // Get auth token
     const authHeader = c.req.header('Authorization')
     if (!authHeader) {
-      console.log('[Invoice Upload] No auth header')
-      return c.json({ error: 'Unauthorized' }, 401)
+      return c.json({ error: 'Unauthorized - No auth header' }, 401)
     }
+    const token = authHeader.replace('Bearer ', '')
 
-    console.log('[Invoice Upload] Parsing request body')
-    const { fileName, fileData } = await c.req.json()
+    console.log('[Invoice Upload] Step 2: Parsing body')
+    const body = await c.req.json()
+    const fileName = body.fileName || 'invoice.pdf'
+    
+    console.log('[Invoice Upload] Step 3: Creating Supabase client with hardcoded credentials')
+    // HARDCODED CREDENTIALS - Cloudflare Workers compatible
+    const supabaseUrl = 'https://dmnxblcdaqnenggfyurw.supabase.co'
+    const supabaseAnonKey = 'sb_publishable_B5zKNJ_dI1254sPk4Yt0hQ_p-3qdaRe'
+    const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
-    if (!fileName || !fileData) {
-      console.log('[Invoice Upload] Missing file data')
-      return c.json({ error: 'File name and data are required' }, 400)
-    }
-
-    console.log('[Invoice Upload] Creating Supabase client')
-    // No env needed - hardcoded credentials
-    const supabase = createServerSupabaseClient()
-
-    console.log('[Invoice Upload] Verifying user auth')
-    const { data: { user }, error: authError } = await supabase.auth.getUser(
-      authHeader.replace('Bearer ', '')
-    )
+    console.log('[Invoice Upload] Step 4: Verifying user')
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token)
 
     if (authError || !user) {
-      console.log('[Invoice Upload] Auth error:', authError)
-      return c.json({ error: 'Unauthorized', details: authError?.message }, 401)
+      console.error('[Invoice Upload] Auth failed:', authError?.message)
+      return c.json({ error: 'Unauthorized - Invalid token', details: authError?.message }, 401)
     }
 
-    console.log('[Invoice Upload] User authenticated:', user.id)
+    console.log('[Invoice Upload] Step 5: User verified:', user.id)
 
-    // Generate mock file URL (no actual file upload needed for demo)
-    const mockFileUrl = `https://dmnxblcdaqnenggfyurw.supabase.co/storage/v1/object/public/invoices/${user.id}/${Date.now()}_${fileName}`
+    // Mock file URL (no actual storage upload needed)
+    const timestamp = Date.now()
+    const mockFileUrl = `https://dmnxblcdaqnenggfyurw.supabase.co/storage/v1/object/public/invoices/${user.id}/${timestamp}_${fileName}`
 
-    console.log('[Invoice Upload] Extracting invoice data')
-    // Extract invoice data using AI (currently mock)
-    const extractedData = await extractInvoiceData(mockFileUrl)
-    console.log('[Invoice Upload] Extracted:', extractedData)
+    console.log('[Invoice Upload] Step 6: Generating mock invoice data')
+    // Mock AI extraction - pure JavaScript, no external modules
+    const suppliers = ['Google', 'Amazon', 'Bezeq']
+    const supplier_name = suppliers[Math.floor(Math.random() * suppliers.length)]
+    const total_amount = parseFloat((Math.random() * 4850 + 150).toFixed(2))
+    
+    console.log('[Invoice Upload] Step 7: Mock extraction result:', { supplier_name, total_amount })
 
-    console.log('[Invoice Upload] Saving to database')
-    // Save to database
+    console.log('[Invoice Upload] Step 8: Inserting into database')
     const { data: invoice, error: insertError } = await supabase
       .from('invoices')
       .insert({
         user_id: user.id,
-        supplier_name: extractedData.supplier_name,
-        total_amount: extractedData.total_amount,
+        supplier_name: supplier_name,
+        total_amount: total_amount,
         file_url: mockFileUrl,
         status: 'processed'
       })
@@ -254,21 +254,26 @@ app.post('/api/invoices/upload', async (c) => {
       .single()
 
     if (insertError) {
-      console.log('[Invoice Upload] Database error:', insertError)
+      console.error('[Invoice Upload] Database insert failed:', insertError)
       return c.json({ 
-        error: 'Failed to save invoice', 
-        details: insertError.message 
+        error: 'Database insert failed', 
+        details: insertError.message,
+        code: insertError.code
       }, 500)
     }
 
-    console.log('[Invoice Upload] Success! Invoice ID:', invoice.id)
-    return c.json({ invoice })
+    console.log('[Invoice Upload] Step 9: SUCCESS! Invoice created:', invoice.id)
+    return c.json({ 
+      success: true,
+      invoice: invoice 
+    })
+    
   } catch (error: any) {
-    console.error('[Invoice Upload] Critical error:', error)
+    console.error('[Invoice Upload] CRITICAL ERROR:', error.message, error.stack)
     return c.json({ 
       error: 'Internal server error', 
-      details: error.message || 'Unknown error',
-      stack: error.stack 
+      message: error.message,
+      type: error.constructor.name
     }, 500)
   }
 })
