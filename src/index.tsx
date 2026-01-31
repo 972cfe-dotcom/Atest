@@ -1,7 +1,8 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { createServerSupabaseClient } from './lib/supabase'
-import type { Document } from './types/database'
+import { extractInvoiceData } from './lib/invoiceExtraction'
+import type { Document, Invoice } from './types/database'
 
 type Bindings = {
   SUPABASE_URL: string
@@ -149,6 +150,140 @@ app.post('/api/documents', async (c) => {
     return c.json({ document })
   } catch (error) {
     console.error('Create document error:', error)
+    return c.json({ error: 'Internal server error' }, 500)
+  }
+})
+
+// ============================================
+// Invoice API Routes
+// ============================================
+
+// Get all invoices for user
+app.get('/api/invoices', async (c) => {
+  try {
+    const authHeader = c.req.header('Authorization')
+    if (!authHeader) {
+      return c.json({ error: 'Unauthorized' }, 401)
+    }
+
+    const supabase = createServerSupabaseClient(c.env)
+    
+    const { data: { user }, error: authError } = await supabase.auth.getUser(
+      authHeader.replace('Bearer ', '')
+    )
+
+    if (authError || !user) {
+      return c.json({ error: 'Unauthorized' }, 401)
+    }
+
+    const { data: invoices, error: fetchError } = await supabase
+      .from('invoices')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+
+    if (fetchError) {
+      return c.json({ error: 'Failed to fetch invoices' }, 500)
+    }
+
+    return c.json({ invoices })
+  } catch (error) {
+    console.error('Fetch invoices error:', error)
+    return c.json({ error: 'Internal server error' }, 500)
+  }
+})
+
+// Upload and process invoice
+app.post('/api/invoices/upload', async (c) => {
+  try {
+    const authHeader = c.req.header('Authorization')
+    if (!authHeader) {
+      return c.json({ error: 'Unauthorized' }, 401)
+    }
+
+    const { fileName, fileData } = await c.req.json()
+
+    if (!fileName || !fileData) {
+      return c.json({ error: 'File name and data are required' }, 400)
+    }
+
+    const supabase = createServerSupabaseClient(c.env)
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser(
+      authHeader.replace('Bearer ', '')
+    )
+
+    if (authError || !user) {
+      return c.json({ error: 'Unauthorized' }, 401)
+    }
+
+    // For now, we'll store a mock file URL
+    // In production, upload to Supabase Storage:
+    // const { data: uploadData, error: uploadError } = await supabase.storage
+    //   .from('invoices')
+    //   .upload(`${user.id}/${Date.now()}_${fileName}`, fileData)
+    
+    const mockFileUrl = `https://dmnxblcdaqnenggfyurw.supabase.co/storage/v1/object/public/invoices/${user.id}/${Date.now()}_${fileName}`
+
+    // Extract invoice data using AI (currently mock)
+    const extractedData = await extractInvoiceData(mockFileUrl)
+
+    // Save to database
+    const { data: invoice, error: insertError } = await supabase
+      .from('invoices')
+      .insert({
+        user_id: user.id,
+        supplier_name: extractedData.supplier_name,
+        total_amount: extractedData.total_amount,
+        file_url: mockFileUrl,
+        status: 'processed'
+      })
+      .select()
+      .single()
+
+    if (insertError) {
+      return c.json({ error: 'Failed to save invoice' }, 500)
+    }
+
+    return c.json({ invoice })
+  } catch (error) {
+    console.error('Invoice upload error:', error)
+    return c.json({ error: 'Internal server error' }, 500)
+  }
+})
+
+// Delete invoice
+app.delete('/api/invoices/:id', async (c) => {
+  try {
+    const authHeader = c.req.header('Authorization')
+    if (!authHeader) {
+      return c.json({ error: 'Unauthorized' }, 401)
+    }
+
+    const invoiceId = c.req.param('id')
+    const supabase = createServerSupabaseClient(c.env)
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser(
+      authHeader.replace('Bearer ', '')
+    )
+
+    if (authError || !user) {
+      return c.json({ error: 'Unauthorized' }, 401)
+    }
+
+    const { error: deleteError } = await supabase
+      .from('invoices')
+      .delete()
+      .eq('id', invoiceId)
+      .eq('user_id', user.id)
+
+    if (deleteError) {
+      return c.json({ error: 'Failed to delete invoice' }, 500)
+    }
+
+    return c.json({ success: true })
+  } catch (error) {
+    console.error('Delete invoice error:', error)
     return c.json({ error: 'Internal server error' }, 500)
   }
 })
@@ -310,16 +445,25 @@ app.get('*', (c) => {
           
           // Dashboard Component
           function Dashboard({ user, onSignOut }) {
+            const [activeTab, setActiveTab] = useState('documents');
             const [documents, setDocuments] = useState([]);
+            const [invoices, setInvoices] = useState([]);
             const [loading, setLoading] = useState(true);
             const [showUpload, setShowUpload] = useState(false);
+            const [showInvoiceUpload, setShowInvoiceUpload] = useState(false);
+            const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+            const [selectedInvoice, setSelectedInvoice] = useState(null);
             const [newDocTitle, setNewDocTitle] = useState('');
             const [uploading, setUploading] = useState(false);
             const [processingId, setProcessingId] = useState(null);
             
             useEffect(() => {
-              loadDocuments();
-            }, []);
+              if (activeTab === 'documents') {
+                loadDocuments();
+              } else if (activeTab === 'invoices') {
+                loadInvoices();
+              }
+            }, [activeTab]);
             
             const loadDocuments = async () => {
               try {
@@ -339,6 +483,88 @@ app.get('*', (c) => {
               } finally {
                 setLoading(false);
               }
+            };
+            
+            const loadInvoices = async () => {
+              setLoading(true);
+              try {
+                const { data: session } = await supabaseClient.auth.getSession();
+                const token = session?.session?.access_token;
+                if (!token) return;
+                
+                const response = await fetch('/api/invoices', {
+                  headers: { Authorization: 'Bearer ' + token }
+                });
+                if (response.ok) {
+                  const data = await response.json();
+                  setInvoices(data.invoices || []);
+                }
+              } catch (error) {
+                console.error('Failed to load invoices:', error);
+              } finally {
+                setLoading(false);
+              }
+            };
+            
+            const handleInvoiceUpload = async (file) => {
+              if (!file) return;
+              setUploading(true);
+              try {
+                const { data: session } = await supabaseClient.auth.getSession();
+                const token = session?.session?.access_token;
+                
+                // Convert file to base64 for demo purposes
+                const reader = new FileReader();
+                reader.onloadend = async () => {
+                  const response = await fetch('/api/invoices/upload', {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      Authorization: 'Bearer ' + token
+                    },
+                    body: JSON.stringify({ 
+                      fileName: file.name,
+                      fileData: reader.result 
+                    })
+                  });
+                  
+                  if (response.ok) {
+                    const data = await response.json();
+                    setInvoices([data.invoice, ...invoices]);
+                    setShowInvoiceUpload(false);
+                  }
+                  setUploading(false);
+                };
+                reader.readAsDataURL(file);
+              } catch (error) {
+                console.error('Failed to upload invoice:', error);
+                setUploading(false);
+              }
+            };
+            
+            const handleViewInvoice = (invoice) => {
+              setSelectedInvoice(invoice);
+              setShowInvoiceModal(true);
+            };
+            
+            const handleDownloadInvoice = (invoice) => {
+              window.open(invoice.file_url, '_blank');
+            };
+            
+            const formatDate = (dateString) => {
+              const date = new Date(dateString);
+              return date.toLocaleDateString('en-US', { 
+                year: 'numeric', 
+                month: 'short', 
+                day: 'numeric' 
+              });
+            };
+            
+            const formatCurrency = (amount) => {
+              return new Intl.NumberFormat('en-US', {
+                style: 'currency',
+                currency: 'USD'
+              }).format(amount);
             };
             
             const handleUpload = async (e) => {
@@ -403,7 +629,18 @@ app.get('*', (c) => {
                     h('h2', { className: 'text-xl font-bold text-gray-900' }, 'DocProcessor')
                   ),
                   h('nav', { className: 'flex-1 p-4 space-y-2' },
-                    h('a', { href: '#', className: 'flex items-center gap-3 px-4 py-3 text-indigo-600 bg-indigo-50 rounded-lg font-medium' }, '📄 Documents')
+                    h('button', { 
+                      onClick: () => setActiveTab('documents'),
+                      className: activeTab === 'documents' 
+                        ? 'w-full flex items-center gap-3 px-4 py-3 text-indigo-600 bg-indigo-50 rounded-lg font-medium' 
+                        : 'w-full flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-gray-50 rounded-lg font-medium'
+                    }, '📄 Documents'),
+                    h('button', { 
+                      onClick: () => setActiveTab('invoices'),
+                      className: activeTab === 'invoices' 
+                        ? 'w-full flex items-center gap-3 px-4 py-3 text-indigo-600 bg-indigo-50 rounded-lg font-medium' 
+                        : 'w-full flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-gray-50 rounded-lg font-medium'
+                    }, '🧾 Invoices')
                   ),
                   h('div', { className: 'p-4 border-t border-gray-200' },
                     h('div', { className: 'flex items-center gap-3 px-4 py-3 text-sm text-gray-600 mb-2' },
@@ -424,42 +661,95 @@ app.get('*', (c) => {
               h('div', { className: 'pl-64' },
                 h('header', { className: 'bg-white border-b border-gray-200 sticky top-0 z-40' },
                   h('div', { className: 'px-8 py-4 flex items-center justify-between' },
-                    h('h1', { className: 'text-2xl font-bold text-gray-900' }, 'My Documents'),
-                    h('button', {
+                    h('h1', { className: 'text-2xl font-bold text-gray-900' }, 
+                      activeTab === 'documents' ? 'My Documents' : 'My Invoices'
+                    ),
+                    activeTab === 'documents' ? h('button', {
                       onClick: () => setShowUpload(true),
                       className: 'flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition'
-                    }, '➕ Upload Document')
+                    }, '➕ Upload Document') : h('button', {
+                      onClick: () => setShowInvoiceUpload(true),
+                      className: 'flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition'
+                    }, '➕ Upload Invoice')
                   )
                 ),
                 h('main', { className: 'p-8' },
                   loading ? h('div', { className: 'flex items-center justify-center py-12' }, '⏳ Loading...') :
-                  documents.length === 0 ? h('div', { className: 'text-center py-12' },
-                    h('div', { className: 'text-6xl mb-4' }, '📤'),
-                    h('h3', { className: 'text-xl font-semibold text-gray-900 mb-2' }, 'No documents yet'),
-                    h('p', { className: 'text-gray-600 mb-6' }, 'Upload your first document to get started'),
-                    h('button', {
-                      onClick: () => setShowUpload(true),
-                      className: 'inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition'
-                    }, '➕ Upload Document')
-                  ) :
-                  h('div', { className: 'grid gap-4 md:grid-cols-2 lg:grid-cols-3' },
-                    documents.map(doc => 
-                      h('div', { key: doc.id, className: 'bg-white rounded-lg border border-gray-200 p-6 hover:shadow-lg transition' },
-                        h('div', { className: 'flex items-start justify-between mb-4' },
-                          h('div', { className: 'text-4xl' }, '📄'),
-                          h('div', { className: 'text-2xl' }, getStatusIcon(doc.status))
+                  activeTab === 'documents' ? (
+                    documents.length === 0 ? h('div', { className: 'text-center py-12' },
+                      h('div', { className: 'text-6xl mb-4' }, '📤'),
+                      h('h3', { className: 'text-xl font-semibold text-gray-900 mb-2' }, 'No documents yet'),
+                      h('p', { className: 'text-gray-600 mb-6' }, 'Upload your first document to get started'),
+                      h('button', {
+                        onClick: () => setShowUpload(true),
+                        className: 'inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition'
+                      }, '➕ Upload Document')
+                    ) :
+                    h('div', { className: 'grid gap-4 md:grid-cols-2 lg:grid-cols-3' },
+                      documents.map(doc => 
+                        h('div', { key: doc.id, className: 'bg-white rounded-lg border border-gray-200 p-6 hover:shadow-lg transition' },
+                          h('div', { className: 'flex items-start justify-between mb-4' },
+                            h('div', { className: 'text-4xl' }, '📄'),
+                            h('div', { className: 'text-2xl' }, getStatusIcon(doc.status))
+                          ),
+                          h('h3', { className: 'text-lg font-semibold text-gray-900 mb-2' }, doc.title),
+                          h('p', { className: 'text-sm text-gray-600 mb-4' },
+                            'Status: ',
+                            h('span', { className: 'font-medium capitalize' }, doc.status)
+                          ),
+                          doc.content && h('p', { className: 'text-sm text-gray-700 mb-4 line-clamp-2' }, doc.content),
+                          doc.status === 'pending' && h('button', {
+                            onClick: () => handleProcessOCR(doc.id),
+                            disabled: processingId === doc.id,
+                            className: 'w-full px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition disabled:opacity-50'
+                          }, processingId === doc.id ? '⚙️ Processing...' : '▶️ Process OCR')
+                        )
+                      )
+                    )
+                  ) : (
+                    // Invoices Tab
+                    invoices.length === 0 ? h('div', { className: 'text-center py-12' },
+                      h('div', { className: 'text-6xl mb-4' }, '🧾'),
+                      h('h3', { className: 'text-xl font-semibold text-gray-900 mb-2' }, 'No invoices yet'),
+                      h('p', { className: 'text-gray-600 mb-6' }, 'Upload your first invoice to get started'),
+                      h('button', {
+                        onClick: () => setShowInvoiceUpload(true),
+                        className: 'inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition'
+                      }, '➕ Upload Invoice')
+                    ) :
+                    h('div', { className: 'bg-white rounded-lg border border-gray-200 overflow-hidden' },
+                      h('table', { className: 'min-w-full divide-y divide-gray-200' },
+                        h('thead', { className: 'bg-gray-50' },
+                          h('tr', {},
+                            h('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider' }, 'Date'),
+                            h('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider' }, 'Supplier Name'),
+                            h('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider' }, 'Total Amount'),
+                            h('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider' }, 'Status'),
+                            h('th', { className: 'px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider' }, 'Actions')
+                          )
                         ),
-                        h('h3', { className: 'text-lg font-semibold text-gray-900 mb-2' }, doc.title),
-                        h('p', { className: 'text-sm text-gray-600 mb-4' },
-                          'Status: ',
-                          h('span', { className: 'font-medium capitalize' }, doc.status)
-                        ),
-                        doc.content && h('p', { className: 'text-sm text-gray-700 mb-4 line-clamp-2' }, doc.content),
-                        doc.status === 'pending' && h('button', {
-                          onClick: () => handleProcessOCR(doc.id),
-                          disabled: processingId === doc.id,
-                          className: 'w-full px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition disabled:opacity-50'
-                        }, processingId === doc.id ? '⚙️ Processing...' : '▶️ Process OCR')
+                        h('tbody', { className: 'bg-white divide-y divide-gray-200' },
+                          invoices.map(invoice =>
+                            h('tr', { key: invoice.id, className: 'hover:bg-gray-50' },
+                              h('td', { className: 'px-6 py-4 whitespace-nowrap text-sm text-gray-900' }, formatDate(invoice.created_at)),
+                              h('td', { className: 'px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900' }, invoice.supplier_name),
+                              h('td', { className: 'px-6 py-4 whitespace-nowrap text-sm text-gray-900' }, formatCurrency(invoice.total_amount)),
+                              h('td', { className: 'px-6 py-4 whitespace-nowrap' },
+                                h('span', { className: 'px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800' }, invoice.status)
+                              ),
+                              h('td', { className: 'px-6 py-4 whitespace-nowrap text-right text-sm font-medium' },
+                                h('button', {
+                                  onClick: () => handleViewInvoice(invoice),
+                                  className: 'text-indigo-600 hover:text-indigo-900 mr-4'
+                                }, '👁️ View'),
+                                h('button', {
+                                  onClick: () => handleDownloadInvoice(invoice),
+                                  className: 'text-green-600 hover:text-green-900'
+                                }, '⬇️ Download')
+                              )
+                            )
+                          )
+                        )
                       )
                     )
                   )
@@ -492,6 +782,93 @@ app.get('*', (c) => {
                         className: 'flex-1 px-4 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition disabled:opacity-50'
                       }, uploading ? '⏳ Uploading...' : '📤 Upload')
                     )
+                  )
+                )
+              ),
+              showInvoiceUpload && h('div', { className: 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4' },
+                h('div', { className: 'bg-white rounded-2xl p-8 max-w-md w-full' },
+                  h('h2', { className: 'text-2xl font-bold text-gray-900 mb-6' }, 'Upload Invoice'),
+                  h('div', { className: 'space-y-6' },
+                    h('div', {},
+                      h('label', { className: 'block text-sm font-medium text-gray-700 mb-2' }, 'Select Invoice File'),
+                      h('input', {
+                        type: 'file',
+                        accept: 'image/*,application/pdf',
+                        onChange: (e) => {
+                          if (e.target.files && e.target.files[0]) {
+                            handleInvoiceUpload(e.target.files[0]);
+                          }
+                        },
+                        className: 'w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition',
+                        disabled: uploading
+                      })
+                    ),
+                    h('div', { className: 'text-sm text-gray-500' },
+                      'Upload an invoice image or PDF. AI will automatically extract supplier name and amount.'
+                    ),
+                    uploading && h('div', { className: 'flex items-center gap-2 text-indigo-600' },
+                      h('div', { className: 'animate-spin text-2xl' }, '⚙️'),
+                      h('span', {}, 'Processing invoice...')
+                    ),
+                    h('div', { className: 'flex gap-4' },
+                      h('button', {
+                        type: 'button',
+                        onClick: () => setShowInvoiceUpload(false),
+                        className: 'flex-1 px-4 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition',
+                        disabled: uploading
+                      }, 'Cancel')
+                    )
+                  )
+                )
+              ),
+              showInvoiceModal && selectedInvoice && h('div', { 
+                className: 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4',
+                onClick: () => setShowInvoiceModal(false)
+              },
+                h('div', { 
+                  className: 'bg-white rounded-2xl p-8 max-w-4xl w-full max-h-[90vh] overflow-auto',
+                  onClick: (e) => e.stopPropagation()
+                },
+                  h('div', { className: 'flex justify-between items-start mb-6' },
+                    h('div', {},
+                      h('h2', { className: 'text-2xl font-bold text-gray-900 mb-2' }, 'Invoice Details'),
+                      h('p', { className: 'text-gray-600' }, 'Supplier: ' + selectedInvoice.supplier_name)
+                    ),
+                    h('button', {
+                      onClick: () => setShowInvoiceModal(false),
+                      className: 'text-gray-400 hover:text-gray-600 text-2xl'
+                    }, '✕')
+                  ),
+                  h('div', { className: 'grid md:grid-cols-2 gap-6 mb-6' },
+                    h('div', {},
+                      h('p', { className: 'text-sm text-gray-600 mb-1' }, 'Total Amount'),
+                      h('p', { className: 'text-2xl font-bold text-gray-900' }, formatCurrency(selectedInvoice.total_amount))
+                    ),
+                    h('div', {},
+                      h('p', { className: 'text-sm text-gray-600 mb-1' }, 'Date'),
+                      h('p', { className: 'text-lg text-gray-900' }, formatDate(selectedInvoice.created_at))
+                    ),
+                    h('div', {},
+                      h('p', { className: 'text-sm text-gray-600 mb-1' }, 'Status'),
+                      h('span', { className: 'px-3 py-1 inline-flex text-sm font-semibold rounded-full bg-green-100 text-green-800' }, selectedInvoice.status)
+                    )
+                  ),
+                  h('div', { className: 'bg-gray-100 rounded-lg p-8 mb-6 min-h-[400px] flex items-center justify-center' },
+                    h('div', { className: 'text-center' },
+                      h('div', { className: 'text-6xl mb-4' }, '🧾'),
+                      h('p', { className: 'text-gray-600' }, 'Invoice preview'),
+                      h('p', { className: 'text-sm text-gray-500 mt-2' }, 'File: ' + selectedInvoice.file_url.split('/').pop())
+                    )
+                  ),
+                  h('div', { className: 'flex gap-4' },
+                    h('button', {
+                      onClick: () => handleDownloadInvoice(selectedInvoice),
+                      className: 'flex-1 px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition flex items-center justify-center gap-2'
+                    }, '⬇️ Download Invoice'),
+                    h('button', {
+                      onClick: () => setShowInvoiceModal(false),
+                      className: 'px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition'
+                    }, 'Close')
                   )
                 )
               )
