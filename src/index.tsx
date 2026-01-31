@@ -484,6 +484,7 @@ app.get('*', (c) => {
             const [newDocTitle, setNewDocTitle] = useState('');
             const [uploading, setUploading] = useState(false);
             const [processingId, setProcessingId] = useState(null);
+            const [selectedFile, setSelectedFile] = useState(null);
             
             useEffect(() => {
               if (activeTab === 'documents') {
@@ -534,38 +535,92 @@ app.get('*', (c) => {
               }
             };
             
-            const handleInvoiceUpload = async (file) => {
-              if (!file) return;
+            const handleFileSelect = (e) => {
+              console.log('[Invoice Upload] File selected:', e.target.files[0]?.name);
+              if (e.target.files && e.target.files[0]) {
+                setSelectedFile(e.target.files[0]);
+                console.log('[Invoice Upload] File stored in state:', e.target.files[0].name);
+              }
+            };
+            
+            const handleInvoiceUpload = async () => {
+              console.log('[Invoice Upload] Upload button clicked');
+              console.log('[Invoice Upload] Selected file:', selectedFile);
+              
+              if (!selectedFile) {
+                console.error('[Invoice Upload] No file selected');
+                alert('Please select a file first');
+                return;
+              }
+              
+              console.log('[Invoice Upload] Starting upload process...');
               setUploading(true);
+              
               try {
+                console.log('[Invoice Upload] Getting auth session');
                 const { data: session } = await supabaseClient.auth.getSession();
                 const token = session?.session?.access_token;
+                console.log('[Invoice Upload] Token retrieved:', token ? 'Yes' : 'No');
                 
+                if (!token) {
+                  console.error('[Invoice Upload] No auth token');
+                  alert('Not authenticated. Please sign in.');
+                  setUploading(false);
+                  return;
+                }
+                
+                console.log('[Invoice Upload] Reading file as base64');
                 // Convert file to base64 for demo purposes
                 const reader = new FileReader();
                 reader.onloadend = async () => {
-                  const response = await fetch('/api/invoices/upload', {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                      Authorization: 'Bearer ' + token
-                    },
-                    body: JSON.stringify({ 
-                      fileName: file.name,
-                      fileData: reader.result 
-                    })
-                  });
+                  console.log('[Invoice Upload] File read complete, sending to API');
                   
-                  if (response.ok) {
-                    const data = await response.json();
-                    setInvoices([data.invoice, ...invoices]);
-                    setShowInvoiceUpload(false);
+                  try {
+                    const response = await fetch('/api/invoices/upload', {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: 'Bearer ' + token
+                      },
+                      body: JSON.stringify({ 
+                        fileName: selectedFile.name,
+                        fileData: reader.result 
+                      })
+                    });
+                    
+                    console.log('[Invoice Upload] API response status:', response.status);
+                    
+                    if (response.ok) {
+                      const data = await response.json();
+                      console.log('[Invoice Upload] Success! Invoice data:', data);
+                      setInvoices([data.invoice, ...invoices]);
+                      setShowInvoiceUpload(false);
+                      setSelectedFile(null);
+                      alert('Invoice uploaded successfully!');
+                    } else {
+                      const errorData = await response.json();
+                      console.error('[Invoice Upload] API error:', errorData);
+                      alert('Upload failed: ' + (errorData.error || 'Unknown error'));
+                    }
+                  } catch (fetchError) {
+                    console.error('[Invoice Upload] Fetch error:', fetchError);
+                    alert('Network error: ' + fetchError.message);
+                  } finally {
+                    setUploading(false);
                   }
+                };
+                
+                reader.onerror = (error) => {
+                  console.error('[Invoice Upload] FileReader error:', error);
+                  alert('Failed to read file');
                   setUploading(false);
                 };
-                reader.readAsDataURL(file);
+                
+                reader.readAsDataURL(selectedFile);
+                
               } catch (error) {
-                console.error('Failed to upload invoice:', error);
+                console.error('[Invoice Upload] Outer catch error:', error);
+                alert('Failed to upload invoice: ' + error.message);
                 setUploading(false);
               }
             };
@@ -822,14 +877,13 @@ app.get('*', (c) => {
                       h('input', {
                         type: 'file',
                         accept: 'image/*,application/pdf',
-                        onChange: (e) => {
-                          if (e.target.files && e.target.files[0]) {
-                            handleInvoiceUpload(e.target.files[0]);
-                          }
-                        },
+                        onChange: handleFileSelect,
                         className: 'w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition',
                         disabled: uploading
-                      })
+                      }),
+                      selectedFile && h('p', { className: 'mt-2 text-sm text-green-600' },
+                        '✓ Selected: ' + selectedFile.name
+                      )
                     ),
                     h('div', { className: 'text-sm text-gray-500' },
                       'Upload an invoice image or PDF. AI will automatically extract supplier name and amount.'
@@ -841,10 +895,20 @@ app.get('*', (c) => {
                     h('div', { className: 'flex gap-4' },
                       h('button', {
                         type: 'button',
-                        onClick: () => setShowInvoiceUpload(false),
+                        onClick: () => {
+                          console.log('[Invoice Upload] Cancel clicked');
+                          setShowInvoiceUpload(false);
+                          setSelectedFile(null);
+                        },
                         className: 'flex-1 px-4 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition',
                         disabled: uploading
-                      }, 'Cancel')
+                      }, 'Cancel'),
+                      h('button', {
+                        type: 'button',
+                        onClick: handleInvoiceUpload,
+                        className: 'flex-1 px-4 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition disabled:opacity-50',
+                        disabled: uploading || !selectedFile
+                      }, uploading ? '⏳ Uploading...' : '📤 Upload')
                     )
                   )
                 )
