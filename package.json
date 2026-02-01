@@ -13,6 +13,7 @@
     "test": "curl http://localhost:3000"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@supabase/supabase-js": "^2.89.0",
     "hono": "^4.11.3",
     "lucide-react": "^0.562.0",

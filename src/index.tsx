@@ -9,6 +9,7 @@ type Bindings = {
   SUPABASE_URL: string
   SUPABASE_ANON_KEY: string
   OPENAI_API_KEY: string
+  GOOGLE_API_KEY: string
 }
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -197,153 +198,161 @@ app.get('/api/invoices', async (c) => {
   }
 })
 
-// Analyze invoice with OpenAI GPT-4o - AUTO EXTRACT (Raw Fetch with Debug Logging)
+// Analyze invoice with Google Gemini 1.5 Flash - Native PDF Support
 app.post('/api/invoices/analyze', async (c) => {
-  console.log('=== INVOICE ANALYZE START ===')
+  console.log('=== INVOICE ANALYZE START (Google Gemini 1.5 Flash) ===')
   
   try {
-    console.log('[Invoice Analyze] Step 1: Endpoint called')
+    console.log('[Gemini Analyze] Step 1: Endpoint called')
     
-    // Check environment context
-    console.log('[Invoice Analyze] Environment check:')
+    // Check environment
+    console.log('[Gemini Analyze] Environment check:')
     console.log('  - c.env exists:', !!c.env)
-    console.log('  - c.env.OPENAI_API_KEY exists:', !!c.env?.OPENAI_API_KEY)
+    console.log('  - c.env.GOOGLE_API_KEY exists:', !!c.env?.GOOGLE_API_KEY)
     
     // Parse request body
     let body
     try {
       body = await c.req.json()
-      console.log('[Invoice Analyze] Step 2: Body parsed successfully')
+      console.log('[Gemini Analyze] Step 2: Body parsed successfully')
     } catch (parseError) {
-      console.error('[Invoice Analyze] Body parse error:', parseError)
+      console.error('[Gemini Analyze] Body parse error:', parseError)
       return c.json({ 
         error: 'Failed to parse request body', 
         details: parseError.message 
       }, 400)
     }
     
-    const fileData = body.fileData
+    const fileData = body.fileData  // base64 data URL: data:image/png;base64,... or data:application/pdf;base64,...
+    const mimeType = body.mimeType || 'image/jpeg'  // fallback
     
     if (!fileData) {
-      console.error('[Invoice Analyze] No file data in request')
+      console.error('[Gemini Analyze] No file data in request')
       return c.json({ error: 'File data is required' }, 400)
     }
     
-    console.log('[Invoice Analyze] Step 3: File data received (length:', fileData.length, ')')
+    console.log('[Gemini Analyze] Step 3: File data received')
+    console.log('[Gemini Analyze] MIME type:', mimeType)
+    console.log('[Gemini Analyze] Data length:', fileData.length)
     
-    // Read OpenAI API Key from Cloudflare environment
-    const openaiApiKey = c.env?.OPENAI_API_KEY
+    // Read Google API Key from Cloudflare environment
+    const googleApiKey = c.env?.GOOGLE_API_KEY
     
-    if (!openaiApiKey) {
-      console.error('[Invoice Analyze] ❌ OPENAI_API_KEY not found in environment')
-      console.error('[Invoice Analyze] Available env keys:', Object.keys(c.env || {}))
+    if (!googleApiKey) {
+      console.error('[Gemini Analyze] ❌ GOOGLE_API_KEY not found in environment')
+      console.error('[Gemini Analyze] Available env keys:', Object.keys(c.env || {}))
       return c.json({ 
-        error: 'Missing OPENAI_API_KEY in Cloudflare Settings',
-        hint: 'Add OPENAI_API_KEY in Cloudflare Dashboard → Settings → Environment Variables',
+        error: 'Missing GOOGLE_API_KEY in Cloudflare Settings',
+        hint: 'Add GOOGLE_API_KEY in Cloudflare Dashboard → Settings → Environment Variables',
         supplier_name: null,
         total_amount: null
       }, 500)
     }
     
-    console.log('[Invoice Analyze] ✓ API Key found (length:', openaiApiKey.length, ')')
-    console.log('[Invoice Analyze] Step 4: Preparing OpenAI API request')
+    console.log('[Gemini Analyze] ✓ API Key found (length:', googleApiKey.length, ')')
+    console.log('[Gemini Analyze] Step 4: Preparing Google Gemini API request')
     
-    const systemPrompt = `Analyze this invoice image. Extract the 'supplier_name' (can be Hebrew/English) and 'total_amount'. 
-Return ONLY a JSON object: { "supplier_name": "...", "total_amount": 0.00 }. 
-If unsure, return null for that field.
-Do not include any markdown formatting, just return the raw JSON.`
+    // Extract base64 data from data URL
+    let base64Data = fileData
+    if (fileData.includes(',')) {
+      base64Data = fileData.split(',')[1]
+    }
+    
+    console.log('[Gemini Analyze] Base64 data extracted (length:', base64Data.length, ')')
+    
+    const prompt = `Analyze this invoice. Extract the 'supplier_name' (Hebrew/English) and 'total_amount'. 
+Return ONLY a clean JSON object: { "supplier_name": "...", "total_amount": 0.00 }. 
+Do not include Markdown formatting.`
 
+    // Prepare request for Gemini REST API
     const requestPayload = {
-      model: 'gpt-4o',
-      messages: [
+      contents: [
         {
-          role: 'system',
-          content: systemPrompt
-        },
-        {
-          role: 'user',
-          content: [
+          parts: [
             {
-              type: 'text',
-              text: 'Extract supplier name and total amount from this invoice:'
+              text: prompt
             },
             {
-              type: 'image_url',
-              image_url: {
-                url: fileData
+              inline_data: {
+                mime_type: mimeType,
+                data: base64Data
               }
             }
           ]
         }
       ],
-      max_tokens: 300,
-      temperature: 0.1
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 300
+      }
     }
     
-    console.log('[Invoice Analyze] Step 5: Calling OpenAI API...')
-    console.log('[Invoice Analyze] URL: https://api.openai.com/v1/chat/completions')
-    console.log('[Invoice Analyze] Model: gpt-4o')
+    console.log('[Gemini Analyze] Step 5: Calling Google Gemini API...')
+    console.log('[Gemini Analyze] URL: https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent')
+    console.log('[Gemini Analyze] Model: gemini-1.5-flash')
     
-    let openaiResponse
+    let geminiResponse
     try {
-      openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${openaiApiKey}`
-        },
-        body: JSON.stringify(requestPayload)
-      })
+      geminiResponse = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${googleApiKey}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(requestPayload)
+        }
+      )
       
-      console.log('[Invoice Analyze] Step 6: OpenAI responded with status:', openaiResponse.status)
+      console.log('[Gemini Analyze] Step 6: Gemini responded with status:', geminiResponse.status)
     } catch (fetchError) {
-      console.error('[Invoice Analyze] Fetch error:', fetchError)
+      console.error('[Gemini Analyze] Fetch error:', fetchError)
       return c.json({ 
-        error: 'Network error calling OpenAI', 
+        error: 'Network error calling Google Gemini', 
         details: fetchError.message 
       }, 500)
     }
     
-    if (!openaiResponse.ok) {
+    if (!geminiResponse.ok) {
       let errorText
       try {
-        errorText = await openaiResponse.text()
+        errorText = await geminiResponse.text()
       } catch {
         errorText = 'Unable to read error response'
       }
-      console.error('[Invoice Analyze] ❌ OpenAI API error (status:', openaiResponse.status, ')')
-      console.error('[Invoice Analyze] Error details:', errorText)
+      console.error('[Gemini Analyze] ❌ Gemini API error (status:', geminiResponse.status, ')')
+      console.error('[Gemini Analyze] Error details:', errorText)
       return c.json({ 
-        error: 'OpenAI API error', 
-        status: openaiResponse.status,
+        error: 'Google Gemini API error', 
+        status: geminiResponse.status,
         details: errorText 
       }, 500)
     }
     
-    let openaiData
+    let geminiData
     try {
-      openaiData = await openaiResponse.json()
-      console.log('[Invoice Analyze] Step 7: OpenAI response parsed successfully')
+      geminiData = await geminiResponse.json()
+      console.log('[Gemini Analyze] Step 7: Gemini response parsed successfully')
     } catch (jsonError) {
-      console.error('[Invoice Analyze] Failed to parse OpenAI response:', jsonError)
+      console.error('[Gemini Analyze] Failed to parse Gemini response:', jsonError)
       return c.json({ 
-        error: 'Invalid JSON from OpenAI', 
+        error: 'Invalid JSON from Google Gemini', 
         details: jsonError.message 
       }, 500)
     }
     
-    const content = openaiData.choices?.[0]?.message?.content
+    const content = geminiData.candidates?.[0]?.content?.parts?.[0]?.text
     if (!content) {
-      console.error('[Invoice Analyze] ❌ No content in OpenAI response')
-      console.error('[Invoice Analyze] Full response:', JSON.stringify(openaiData))
+      console.error('[Gemini Analyze] ❌ No content in Gemini response')
+      console.error('[Gemini Analyze] Full response:', JSON.stringify(geminiData))
       return c.json({ 
-        error: 'No content from OpenAI',
+        error: 'No content from Google Gemini',
         supplier_name: null,
         total_amount: null
       }, 200)
     }
     
-    console.log('[Invoice Analyze] Step 8: Raw content from GPT-4o:', content)
+    console.log('[Gemini Analyze] Step 8: Raw content from Gemini:', content)
     
     // Parse JSON response
     try {
@@ -356,8 +365,8 @@ Do not include any markdown formatting, just return the raw JSON.`
       }
       
       const extracted = JSON.parse(jsonStr)
-      console.log('[Invoice Analyze] ✓ Step 9: Successfully extracted:', extracted)
-      console.log('=== INVOICE ANALYZE SUCCESS ===')
+      console.log('[Gemini Analyze] ✓ Step 9: Successfully extracted:', extracted)
+      console.log('=== GEMINI ANALYZE SUCCESS ===')
       
       return c.json({
         success: true,
@@ -366,10 +375,10 @@ Do not include any markdown formatting, just return the raw JSON.`
       })
       
     } catch (parseError: any) {
-      console.error('[Invoice Analyze] ❌ JSON parse error:', parseError.message)
-      console.error('[Invoice Analyze] Content was:', content)
+      console.error('[Gemini Analyze] ❌ JSON parse error:', parseError.message)
+      console.error('[Gemini Analyze] Content was:', content)
       return c.json({ 
-        error: 'Failed to parse OpenAI response',
+        error: 'Failed to parse Gemini response',
         details: parseError.message,
         raw_content: content,
         supplier_name: null,
@@ -378,9 +387,9 @@ Do not include any markdown formatting, just return the raw JSON.`
     }
     
   } catch (error: any) {
-    console.error('=== INVOICE ANALYZE CRITICAL ERROR ===')
-    console.error('[Invoice Analyze] Error message:', error.message)
-    console.error('[Invoice Analyze] Error stack:', error.stack)
+    console.error('=== GEMINI ANALYZE CRITICAL ERROR ===')
+    console.error('[Gemini Analyze] Error message:', error.message)
+    console.error('[Gemini Analyze] Error stack:', error.stack)
     return c.json({ 
       error: 'Internal server error', 
       message: error.message,
@@ -841,16 +850,19 @@ app.get('*', (c) => {
                 const file = e.target.files[0];
                 setSelectedFile(file);
                 console.log('[Invoice Upload] File stored in state:', file.name);
+                console.log('[Invoice Upload] File type:', file.type);
                 
-                // Auto-analyze with AI
-                console.log('[Invoice Analyze] Starting automatic AI analysis');
+                // Auto-analyze with AI (Google Gemini 1.5 Flash - Native PDF Support)
+                console.log('[Gemini Analyze] Starting automatic AI analysis');
                 setIsAnalyzing(true);
                 
                 try {
                   // Read file as base64
                   const reader = new FileReader();
                   reader.onloadend = async () => {
-                    console.log('[Invoice Analyze] File read complete, sending to AI');
+                    console.log('[Gemini Analyze] File read complete, sending to Gemini');
+                    console.log('[Gemini Analyze] File MIME type:', file.type);
+                    console.log('[Gemini Analyze] Is PDF:', file.type === 'application/pdf');
                     
                     try {
                       const { data: session } = await supabaseClient.auth.getSession();
@@ -863,35 +875,39 @@ app.get('*', (c) => {
                           Authorization: 'Bearer ' + token
                         },
                         body: JSON.stringify({ 
-                          fileData: reader.result
+                          fileData: reader.result,
+                          mimeType: file.type  // Send MIME type for Gemini
                         })
                       });
                       
+                      console.log('[Gemini Analyze] API response status:', response.status);
+                      
                       if (response.ok) {
                         const data = await response.json();
-                        console.log('[Invoice Analyze] AI response:', data);
+                        console.log('[Gemini Analyze] AI response:', data);
                         
                         if (data.supplier_name) {
                           setInvoiceSupplier(data.supplier_name);
-                          console.log('[Invoice Analyze] Auto-filled supplier:', data.supplier_name);
+                          console.log('[Gemini Analyze] Auto-filled supplier:', data.supplier_name);
                         }
                         
                         if (data.total_amount) {
                           setInvoiceAmount(data.total_amount.toString());
-                          console.log('[Invoice Analyze] Auto-filled amount:', data.total_amount);
+                          console.log('[Gemini Analyze] Auto-filled amount:', data.total_amount);
                         }
                         
                         if (data.success) {
-                          alert('AI Analysis Complete! Please review and adjust the filled fields if needed.');
+                          alert('✓ AI Analysis Complete! Fields auto-filled. Please review and adjust if needed.');
                         } else {
                           alert('AI could not extract data. Please fill fields manually.');
                         }
                       } else {
-                        console.error('[Invoice Analyze] API error');
-                        alert('AI analysis failed. Please fill fields manually.');
+                        const errorData = await response.json();
+                        console.error('[Gemini Analyze] API error:', errorData);
+                        alert('AI analysis failed: ' + (errorData.error || 'Unknown error'));
                       }
                     } catch (analyzeError) {
-                      console.error('[Invoice Analyze] Error:', analyzeError);
+                      console.error('[Gemini Analyze] Error:', analyzeError);
                       alert('AI analysis failed. Please fill fields manually.');
                     } finally {
                       setIsAnalyzing(false);
@@ -899,7 +915,7 @@ app.get('*', (c) => {
                   };
                   
                   reader.onerror = () => {
-                    console.error('[Invoice Analyze] FileReader error');
+                    console.error('[Gemini Analyze] FileReader error');
                     setIsAnalyzing(false);
                     alert('Failed to read file. Please try again.');
                   };
@@ -907,7 +923,7 @@ app.get('*', (c) => {
                   reader.readAsDataURL(file);
                   
                 } catch (error) {
-                  console.error('[Invoice Analyze] Outer error:', error);
+                  console.error('[Gemini Analyze] Outer error:', error);
                   setIsAnalyzing(false);
                   alert('AI analysis failed. Please fill fields manually.');
                 }
