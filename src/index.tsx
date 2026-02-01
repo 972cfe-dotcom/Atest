@@ -198,23 +198,36 @@ app.get('/api/invoices', async (c) => {
   }
 })
 
-// Analyze invoice with Google Gemini 1.5 Flash - Pure REST API (No SDK)
+// Analyze invoice with Google Gemini 1.5 Flash - Pure REST API (Debug Version)
 app.post('/api/invoices/analyze', async (c) => {
-  console.log('=== GEMINI ANALYZE START (Pure REST API) ===')
+  // CRITICAL: Check API key FIRST before anything else
+  const apiKey = c.env?.GOOGLE_API_KEY
+  
+  console.log('=== GEMINI ANALYZE START ===')
+  console.log('[Gemini] CRITICAL CHECK - API Key exists:', !!apiKey)
+  
+  if (!apiKey) {
+    console.error('❌ CRITICAL: GOOGLE_API_KEY is missing in c.env')
+    console.error('[Gemini] c.env keys:', Object.keys(c.env || {}))
+    return c.json({ 
+      error: 'Configuration Error', 
+      details: 'GOOGLE_API_KEY is missing from Cloudflare Environment Variables',
+      available_keys: Object.keys(c.env || {}),
+      hint: 'Add GOOGLE_API_KEY in Cloudflare Dashboard → Settings → Environment Variables → Production'
+    }, 500)
+  }
+  
+  console.log('[Gemini] ✓ API Key found (length:', apiKey.length, ')')
+  console.log('[Gemini] ✓ API Key starts with:', apiKey.substring(0, 10) + '...')
   
   try {
-    console.log('[Gemini] Step 1: Endpoint called')
-    
-    // Debug: Check environment
-    console.log('[Gemini] Environment check:')
-    console.log('  - c.env exists:', !!c.env)
-    console.log('  - GOOGLE_API_KEY:', c.env?.GOOGLE_API_KEY ? 'Key Exists ✓' : 'Key Missing ✗')
+    console.log('[Gemini] Step 1: Parsing request body...')
     
     // Parse request body
     let body
     try {
       body = await c.req.json()
-      console.log('[Gemini] Step 2: Body parsed ✓')
+      console.log('[Gemini] ✓ Body parsed successfully')
     } catch (parseError: any) {
       console.error('[Gemini] ❌ Body parse error:', parseError.message)
       return c.json({ 
@@ -223,51 +236,38 @@ app.post('/api/invoices/analyze', async (c) => {
       }, 400)
     }
     
-    const fileData = body.fileData  // data:image/png;base64,... or data:application/pdf;base64,...
+    const fileData = body.fileData
     const mimeType = body.mimeType || 'image/jpeg'
     
     if (!fileData) {
       console.error('[Gemini] ❌ No file data in request')
-      return c.json({ error: 'File data is required' }, 400)
+      return c.json({ 
+        error: 'File data is required',
+        received_keys: Object.keys(body)
+      }, 400)
     }
     
-    console.log('[Gemini] Step 3: File data received ✓')
+    console.log('[Gemini] ✓ File data received')
     console.log('[Gemini] MIME type:', mimeType)
     console.log('[Gemini] Data URL length:', fileData.length)
-    
-    // Check API Key
-    const googleApiKey = c.env?.GOOGLE_API_KEY
-    
-    if (!googleApiKey) {
-      console.error('[Gemini] ❌ GOOGLE_API_KEY not found')
-      console.error('[Gemini] Available env keys:', Object.keys(c.env || {}))
-      return c.json({ 
-        error: 'Missing GOOGLE_API_KEY',
-        hint: 'Add GOOGLE_API_KEY to Cloudflare Environment Variables',
-        available_keys: Object.keys(c.env || {}),
-        supplier_name: null,
-        total_amount: null
-      }, 500)
-    }
-    
-    console.log('[Gemini] ✓ API Key found (length:', googleApiKey.length, ')')
-    console.log('[Gemini] ✓ API Key starts with:', googleApiKey.substring(0, 10) + '...')
     
     // Extract base64 data from data URL
     let base64Data = fileData
     if (fileData.includes(',')) {
       const parts = fileData.split(',')
       base64Data = parts[1]
-      console.log('[Gemini] Extracted base64 from data URL')
+      console.log('[Gemini] ✓ Extracted base64 from data URL')
     }
     
-    console.log('[Gemini] Base64 length:', base64Data.length)
+    console.log('[Gemini] Base64 data length:', base64Data.length)
     
     const prompt = `Analyze this invoice. Extract the 'supplier_name' (Hebrew/English) and 'total_amount'. 
 Return ONLY a clean JSON object: { "supplier_name": "...", "total_amount": 0.00 }. 
 Do not include Markdown formatting.`
 
-    // Build REST API request
+    console.log('[Gemini] Step 2: Building API request...')
+    
+    // Build REST API request payload
     const requestPayload = {
       contents: [
         {
@@ -288,10 +288,10 @@ Do not include Markdown formatting.`
       }
     }
     
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${googleApiKey}`
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`
     
-    console.log('[Gemini] Step 4: Calling Gemini REST API...')
-    console.log('[Gemini] URL:', apiUrl.replace(googleApiKey, 'AIza...'))
+    console.log('[Gemini] Step 3: Calling Google Gemini API...')
+    console.log('[Gemini] URL:', apiUrl.replace(apiKey, 'AIza***'))
     console.log('[Gemini] Payload size:', JSON.stringify(requestPayload).length, 'bytes')
     
     let geminiResponse
@@ -304,11 +304,11 @@ Do not include Markdown formatting.`
         body: JSON.stringify(requestPayload)
       })
       
-      console.log('[Gemini] Step 5: Response received with status:', geminiResponse.status)
-      console.log('[Gemini] Response status text:', geminiResponse.statusText)
+      console.log('[Gemini] ✓ Response received')
+      console.log('[Gemini] Status:', geminiResponse.status, geminiResponse.statusText)
     } catch (fetchError: any) {
       console.error('[Gemini] ❌ Fetch error:', fetchError.message)
-      console.error('[Gemini] Fetch stack:', fetchError.stack)
+      console.error('[Gemini] Stack:', fetchError.stack)
       return c.json({ 
         error: 'Network error calling Google Gemini', 
         details: fetchError.message,
@@ -318,23 +318,24 @@ Do not include Markdown formatting.`
     
     // CRITICAL: Read error response for non-200 status
     if (!geminiResponse.ok) {
+      console.error('[Gemini] ❌ API returned error status:', geminiResponse.status)
+      
       let errorText = ''
       let errorJson = null
       
       try {
         errorText = await geminiResponse.text()
-        console.error('[Gemini] ❌ API error response (raw):', errorText)
+        console.error('[Gemini] Error response (raw):', errorText)
         
-        // Try to parse as JSON for structured error
         try {
           errorJson = JSON.parse(errorText)
-          console.error('[Gemini] ❌ API error (structured):', JSON.stringify(errorJson, null, 2))
+          console.error('[Gemini] Error response (parsed):', JSON.stringify(errorJson, null, 2))
         } catch {
-          console.error('[Gemini] ❌ API error (text):', errorText)
+          // Not JSON
         }
       } catch (readError: any) {
+        console.error('[Gemini] ❌ Failed to read error response:', readError.message)
         errorText = 'Unable to read error response'
-        console.error('[Gemini] ❌ Failed to read error:', readError.message)
       }
       
       return c.json({ 
@@ -343,17 +344,18 @@ Do not include Markdown formatting.`
         statusText: geminiResponse.statusText,
         details: errorText,
         structured_error: errorJson,
-        api_key_check: googleApiKey ? 'Key provided' : 'No key',
-        api_key_length: googleApiKey?.length || 0
+        api_key_provided: !!apiKey,
+        api_key_length: apiKey.length
       }, 500)
     }
     
     // Parse successful response
+    console.log('[Gemini] Step 4: Parsing response...')
     let geminiData
     try {
       geminiData = await geminiResponse.json()
-      console.log('[Gemini] Step 6: Response parsed ✓')
-      console.log('[Gemini] Response structure:', Object.keys(geminiData).join(', '))
+      console.log('[Gemini] ✓ Response parsed')
+      console.log('[Gemini] Response keys:', Object.keys(geminiData).join(', '))
     } catch (jsonError: any) {
       console.error('[Gemini] ❌ JSON parse error:', jsonError.message)
       return c.json({ 
@@ -369,27 +371,34 @@ Do not include Markdown formatting.`
       console.error('[Gemini] Full response:', JSON.stringify(geminiData))
       return c.json({ 
         error: 'No content from Google Gemini',
-        response: geminiData,
+        response_summary: {
+          has_candidates: !!geminiData.candidates,
+          candidates_length: geminiData.candidates?.length || 0
+        },
         supplier_name: null,
         total_amount: null
       }, 200)
     }
     
-    console.log('[Gemini] Step 7: Content extracted:', content.substring(0, 100))
+    console.log('[Gemini] ✓ Content extracted (length:', content.length, ')')
+    console.log('[Gemini] Content preview:', content.substring(0, 100))
     
     // Parse JSON from content
+    console.log('[Gemini] Step 5: Parsing extracted data...')
     try {
       let jsonStr = content.trim()
       
       // Remove markdown code blocks if present
       if (jsonStr.startsWith('```json')) {
         jsonStr = jsonStr.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+        console.log('[Gemini] Removed ```json markers')
       } else if (jsonStr.startsWith('```')) {
         jsonStr = jsonStr.replace(/```\n?/g, '').trim()
+        console.log('[Gemini] Removed ``` markers')
       }
       
       const extracted = JSON.parse(jsonStr)
-      console.log('[Gemini] ✓ Step 8: Extracted:', extracted)
+      console.log('[Gemini] ✓ Successfully extracted:', extracted)
       console.log('=== GEMINI ANALYZE SUCCESS ===')
       
       return c.json({
@@ -399,7 +408,8 @@ Do not include Markdown formatting.`
       })
       
     } catch (parseError: any) {
-      console.error('[Gemini] ❌ JSON parse error:', parseError.message)
+      console.error('[Gemini] ❌ Failed to parse content as JSON')
+      console.error('[Gemini] Parse error:', parseError.message)
       console.error('[Gemini] Content was:', content)
       return c.json({ 
         error: 'Failed to parse Gemini response as JSON',
@@ -410,20 +420,21 @@ Do not include Markdown formatting.`
       }, 200)
     }
     
-  } catch (error: any) {
-    console.error('=== GEMINI ANALYZE CRITICAL ERROR ===')
-    console.error('[Gemini] Error:', error.message)
-    console.error('[Gemini] Stack:', error.stack)
+  } catch (e: any) {
+    console.error('=== GEMINI ANALYZE WORKER CRASH ===')
+    console.error('[Gemini] Error message:', e.message)
+    console.error('[Gemini] Error stack:', e.stack)
+    console.error('[Gemini] Error name:', e.name)
     return c.json({ 
-      error: 'Internal server error', 
-      message: error.message,
-      stack: error.stack,
+      error: 'Worker Crash', 
+      details: e.message,
+      stack: e.stack,
+      error_name: e.name,
       supplier_name: null,
       total_amount: null
     }, 500)
   }
 })
-
 // Upload and process invoice - MANUAL ENTRY MODE
 app.post('/api/invoices/upload', async (c) => {
   try {
