@@ -33,8 +33,8 @@ Modified `/api/invoices/analyze` to read the key from Cloudflare environment:
 
 **Before (INSECURE):**
 ```typescript
-// HARDCODED OpenAI API Key
-const openaiApiKey = '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'
+// HARDCODED OpenAI API Key - REMOVED FOR SECURITY
+const openaiApiKey = 'sk-proj-...[REDACTED]...'
 ```
 
 **After (SECURE):**
