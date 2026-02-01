@@ -288,7 +288,8 @@ Do not include Markdown formatting.`
       }
     }
     
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`
+    // Gemini 2.0 Flash - Available for user's Google Cloud Project
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`
     
     console.log('[Gemini] Step 3: Calling Google Gemini API...')
     console.log('[Gemini] URL:', apiUrl.replace(apiKey, 'AIza***'))
