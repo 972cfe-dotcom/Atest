@@ -264,11 +264,41 @@ app.post('/api/invoices/upload', async (c) => {
     const contentTypeMatch = fileData.match(/data:([^;]+);/)
     const contentType = contentTypeMatch ? contentTypeMatch[1] : 'application/octet-stream'
     console.log('[Invoice Upload] Content type:', contentType)
-
-    // Upload to Supabase Storage
-    console.log('[Invoice Upload] Step 6: Uploading to Supabase Storage')
+    
+    // Extract file extension from original filename or content type
+    console.log('[Invoice Upload] Step 6: Sanitizing filename')
+    console.log('[Invoice Upload] Original filename:', fileName)
+    
+    let fileExtension = 'bin'
+    
+    // Try to get extension from original filename
+    if (fileName && fileName.includes('.')) {
+      const parts = fileName.split('.')
+      fileExtension = parts[parts.length - 1].toLowerCase()
+      console.log('[Invoice Upload] Extension from filename:', fileExtension)
+    } else {
+      // Fallback: get extension from content type
+      const typeMap = {
+        'application/pdf': 'pdf',
+        'image/jpeg': 'jpg',
+        'image/jpg': 'jpg',
+        'image/png': 'png',
+        'image/gif': 'gif',
+        'image/webp': 'webp'
+      }
+      fileExtension = typeMap[contentType] || 'bin'
+      console.log('[Invoice Upload] Extension from content type:', fileExtension)
+    }
+    
+    // Generate SAFE filename with ASCII characters only (no Hebrew, no spaces)
     const timestamp = Date.now()
-    const storagePath = `${userId}/${timestamp}_${fileName}`
+    const randomId = Math.random().toString(36).substring(2, 8)
+    const safeFileName = `${timestamp}_${randomId}.${fileExtension}`
+    console.log('[Invoice Upload] Safe filename:', safeFileName)
+
+    // Upload to Supabase Storage with SAFE filename
+    console.log('[Invoice Upload] Step 7: Uploading to Supabase Storage with safe filename')
+    const storagePath = `${userId}/${safeFileName}`
     console.log('[Invoice Upload] Storage path:', storagePath)
     
     const { data: uploadData, error: uploadError } = await supabase.storage
@@ -292,16 +322,16 @@ app.post('/api/invoices/upload', async (c) => {
     
     console.log('[Invoice Upload] Storage upload success:', uploadData.path)
     
-    // Construct public URL
+    // Construct public URL with SAFE filename
     const publicUrl = `${supabaseUrl}/storage/v1/object/public/invoices/${storagePath}`
-    console.log('[Invoice Upload] Step 7: Public URL:', publicUrl)
+    console.log('[Invoice Upload] Step 8: Public URL:', publicUrl)
 
     // Use MANUAL INPUT (no mock data)
-    console.log('[Invoice Upload] Step 8: Using MANUAL INPUT (no mock data)')
+    console.log('[Invoice Upload] Step 9: Using MANUAL INPUT (no mock data)')
     console.log('[Invoice Upload] User provided:', { supplier_name: supplierName, total_amount: totalAmount })
 
     // Insert into database with REAL file URL and MANUAL DATA
-    console.log('[Invoice Upload] Step 9: Inserting into database with REAL file URL and MANUAL data')
+    console.log('[Invoice Upload] Step 10: Inserting into database with REAL file URL and MANUAL data')
     const { data: invoice, error: insertError } = await supabase
       .from('invoices')
       .insert({
@@ -329,7 +359,7 @@ app.post('/api/invoices/upload', async (c) => {
       }, 500)
     }
 
-    console.log('[Invoice Upload] Step 10: SUCCESS! Invoice created:', invoice.id)
+    console.log('[Invoice Upload] Step 11: SUCCESS! Invoice created:', invoice.id)
     console.log('[Invoice Upload] File URL in database:', invoice.file_url)
     console.log('[Invoice Upload] Supplier in database:', invoice.supplier_name)
     console.log('[Invoice Upload] Amount in database:', invoice.total_amount)
