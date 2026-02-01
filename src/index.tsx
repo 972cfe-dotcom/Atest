@@ -162,41 +162,6 @@ app.post('/api/documents', async (c) => {
 // ============================================
 
 // Get all invoices for user
-app.get('/api/invoices', async (c) => {
-  try {
-    const authHeader = c.req.header('Authorization')
-    if (!authHeader) {
-      return c.json({ error: 'Unauthorized' }, 401)
-    }
-
-    // No env needed - hardcoded credentials
-    const supabase = createServerSupabaseClient()
-    
-    const { data: { user }, error: authError } = await supabase.auth.getUser(
-      authHeader.replace('Bearer ', '')
-    )
-
-    if (authError || !user) {
-      return c.json({ error: 'Unauthorized' }, 401)
-    }
-
-    const { data: invoices, error: fetchError } = await supabase
-      .from('invoices')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-
-    if (fetchError) {
-      console.error('[Get Invoices] Error:', fetchError)
-      return c.json({ error: 'Failed to fetch invoices', details: fetchError.message }, 500)
-    }
-
-    return c.json({ invoices })
-  } catch (error: any) {
-    console.error('[Get Invoices] Critical error:', error)
-    return c.json({ error: 'Internal server error', details: error.message }, 500)
-  }
-})
 
 // Analyze invoice with Google Gemini 1.5 Flash - Pure REST API (Debug Version)
 app.post('/api/invoices/analyze', async (c) => {
@@ -436,6 +401,58 @@ Do not include Markdown formatting.`
     }, 500)
   }
 })
+// Upload and process invoice - MANUAL ENTRY MODE
+// Get all invoices for the current user
+app.get('/api/invoices', async (c) => {
+  try {
+    console.log('[Invoices List] Fetching invoices for user')
+    
+    // Get auth token from header
+    const authHeader = c.req.header('Authorization')
+    if (!authHeader) {
+      console.error('[Invoices List] No Authorization header')
+      return c.json({ error: 'Unauthorized' }, 401)
+    }
+    
+    const token = authHeader.replace('Bearer ', '')
+    
+    // Create Supabase client with service role key
+    const supabaseUrl = 'https://dmnxblcdaqnenggfyurw.supabase.co'
+    const supabaseServiceKey = 'sb_secret_ZpY2INapqj8cym1xdRjYGA_CJiBL0Eh'
+    const supabase = createClient(supabaseUrl, supabaseServiceKey)
+    
+    // Verify user with auth token
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token)
+    
+    if (authError || !user) {
+      console.error('[Invoices List] Auth failed:', authError)
+      return c.json({ error: 'Unauthorized', details: authError?.message }, 401)
+    }
+    
+    console.log('[Invoices List] User verified:', user.id)
+    
+    // Fetch invoices for this user
+    const { data: invoices, error: fetchError } = await supabase
+      .from('invoices')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+    
+    if (fetchError) {
+      console.error('[Invoices List] Fetch error:', fetchError)
+      return c.json({ error: 'Failed to fetch invoices', details: fetchError.message }, 500)
+    }
+    
+    console.log('[Invoices List] Found', invoices?.length || 0, 'invoices')
+    
+    return c.json({ invoices: invoices || [] })
+    
+  } catch (error: any) {
+    console.error('[Invoices List] Error:', error.message)
+    return c.json({ error: 'Internal server error', details: error.message }, 500)
+  }
+})
+
 // Upload and process invoice - MANUAL ENTRY MODE
 app.post('/api/invoices/upload', async (c) => {
   try {
