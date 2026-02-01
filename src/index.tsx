@@ -1430,12 +1430,44 @@ app.get('*', (c) => {
                       h('span', { className: 'px-3 py-1 inline-flex text-sm font-semibold rounded-full bg-green-100 text-green-800' }, selectedInvoice.status)
                     )
                   ),
-                  h('div', { className: 'bg-gray-100 rounded-lg p-8 mb-6 min-h-[400px] flex items-center justify-center' },
-                    h('div', { className: 'text-center' },
-                      h('div', { className: 'text-6xl mb-4' }, '🧾'),
-                      h('p', { className: 'text-gray-600' }, 'Invoice preview'),
-                      h('p', { className: 'text-sm text-gray-500 mt-2' }, 'File: ' + selectedInvoice.file_url.split('/').pop())
-                    )
+                  // Invoice Preview - PDF or Image
+                  h('div', { className: 'bg-gray-100 rounded-lg p-4 mb-6 overflow-hidden' },
+                    (() => {
+                      const fileUrl = selectedInvoice.file_url;
+                      const fileName = fileUrl.split('/').pop() || '';
+                      const fileExt = fileName.split('.').pop()?.toLowerCase() || '';
+                      const isPDF = fileExt === 'pdf' || fileUrl.includes('.pdf');
+                      
+                      if (isPDF) {
+                        // Render PDF in iframe
+                        return h('div', { className: 'w-full' },
+                          h('p', { className: 'text-sm text-gray-600 mb-2' }, '📄 PDF Preview:'),
+                          h('iframe', {
+                            src: fileUrl,
+                            type: 'application/pdf',
+                            className: 'w-full rounded-lg border border-gray-300',
+                            style: { height: '600px', minHeight: '600px' }
+                          })
+                        );
+                      } else {
+                        // Render image
+                        return h('div', { className: 'w-full' },
+                          h('p', { className: 'text-sm text-gray-600 mb-2' }, '🖼️ Image Preview:'),
+                          h('img', {
+                            src: fileUrl,
+                            alt: 'Invoice',
+                            className: 'w-full h-auto max-h-[600px] object-contain rounded-lg border border-gray-300 bg-white',
+                            onError: (e) => {
+                              e.target.style.display = 'none';
+                              const parent = e.target.parentElement;
+                              if (parent) {
+                                parent.innerHTML = '<div class="text-center py-20"><p class="text-gray-500">⚠️ Failed to load preview</p><p class="text-sm text-gray-400 mt-2">' + fileName + '</p></div>';
+                              }
+                            }
+                          })
+                        );
+                      }
+                    })()
                   ),
                   h('div', { className: 'flex gap-4' },
                     h('button', {
