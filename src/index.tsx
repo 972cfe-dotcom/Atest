@@ -196,6 +196,131 @@ app.get('/api/invoices', async (c) => {
   }
 })
 
+// Analyze invoice with OpenAI GPT-4o - AUTO EXTRACT
+app.post('/api/invoices/analyze', async (c) => {
+  try {
+    console.log('[Invoice Analyze] Step 1: Starting AI analysis')
+    
+    const body = await c.req.json()
+    const fileData = body.fileData  // base64 data URL
+    
+    if (!fileData) {
+      console.error('[Invoice Analyze] No file data')
+      return c.json({ error: 'File data is required' }, 400)
+    }
+    
+    console.log('[Invoice Analyze] Step 2: Preparing OpenAI request')
+    
+    // HARDCODED OpenAI API Key
+    const openaiApiKey = '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'
+    
+    const systemPrompt = `Analyze this invoice image. Extract the 'supplier_name' (can be Hebrew/English) and 'total_amount'. 
+Return ONLY a JSON object: { "supplier_name": "...", "total_amount": 0.00 }. 
+If unsure, return null for that field.
+Do not include any markdown formatting, just return the raw JSON.`
+
+    console.log('[Invoice Analyze] Step 3: Calling OpenAI GPT-4o API')
+    
+    const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${openaiApiKey}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o',
+        messages: [
+          {
+            role: 'system',
+            content: systemPrompt
+          },
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: 'Extract supplier name and total amount from this invoice:'
+              },
+              {
+                type: 'image_url',
+                image_url: {
+                  url: fileData
+                }
+              }
+            ]
+          }
+        ],
+        max_tokens: 300,
+        temperature: 0.1
+      })
+    })
+    
+    if (!openaiResponse.ok) {
+      const errorText = await openaiResponse.text()
+      console.error('[Invoice Analyze] OpenAI API error:', errorText)
+      return c.json({ 
+        error: 'OpenAI API error', 
+        details: errorText 
+      }, 500)
+    }
+    
+    const openaiData = await openaiResponse.json()
+    console.log('[Invoice Analyze] Step 4: OpenAI response received')
+    
+    const content = openaiData.choices?.[0]?.message?.content
+    if (!content) {
+      console.error('[Invoice Analyze] No content in OpenAI response')
+      return c.json({ 
+        error: 'No content from OpenAI',
+        supplier_name: null,
+        total_amount: null
+      }, 200)
+    }
+    
+    console.log('[Invoice Analyze] Raw content:', content)
+    
+    // Parse JSON response
+    try {
+      // Remove markdown code blocks if present
+      let jsonStr = content.trim()
+      if (jsonStr.startsWith('```json')) {
+        jsonStr = jsonStr.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+      } else if (jsonStr.startsWith('```')) {
+        jsonStr = jsonStr.replace(/```\n?/g, '').trim()
+      }
+      
+      const extracted = JSON.parse(jsonStr)
+      console.log('[Invoice Analyze] Step 5: Extracted data:', extracted)
+      
+      return c.json({
+        success: true,
+        supplier_name: extracted.supplier_name || null,
+        total_amount: extracted.total_amount || null
+      })
+      
+    } catch (parseError: any) {
+      console.error('[Invoice Analyze] JSON parse error:', parseError.message)
+      console.error('[Invoice Analyze] Content was:', content)
+      return c.json({ 
+        error: 'Failed to parse OpenAI response',
+        details: parseError.message,
+        raw_content: content,
+        supplier_name: null,
+        total_amount: null
+      }, 200)
+    }
+    
+  } catch (error: any) {
+    console.error('[Invoice Analyze] CRITICAL ERROR:', error.message, error.stack)
+    return c.json({ 
+      error: 'Internal server error', 
+      message: error.message,
+      supplier_name: null,
+      total_amount: null
+    }, 200)
+  }
+})
+
 // Upload and process invoice - MANUAL ENTRY MODE
 app.post('/api/invoices/upload', async (c) => {
   try {
@@ -589,6 +714,7 @@ app.get('*', (c) => {
             const [selectedFile, setSelectedFile] = useState(null);
             const [invoiceSupplier, setInvoiceSupplier] = useState('');
             const [invoiceAmount, setInvoiceAmount] = useState('');
+            const [isAnalyzing, setIsAnalyzing] = useState(false);
             
             useEffect(() => {
               if (activeTab === 'documents') {
@@ -639,11 +765,82 @@ app.get('*', (c) => {
               }
             };
             
-            const handleFileSelect = (e) => {
+            const handleFileSelect = async (e) => {
               console.log('[Invoice Upload] File selected:', e.target.files[0]?.name);
               if (e.target.files && e.target.files[0]) {
-                setSelectedFile(e.target.files[0]);
-                console.log('[Invoice Upload] File stored in state:', e.target.files[0].name);
+                const file = e.target.files[0];
+                setSelectedFile(file);
+                console.log('[Invoice Upload] File stored in state:', file.name);
+                
+                // Auto-analyze with AI
+                console.log('[Invoice Analyze] Starting automatic AI analysis');
+                setIsAnalyzing(true);
+                
+                try {
+                  // Read file as base64
+                  const reader = new FileReader();
+                  reader.onloadend = async () => {
+                    console.log('[Invoice Analyze] File read complete, sending to AI');
+                    
+                    try {
+                      const { data: session } = await supabaseClient.auth.getSession();
+                      const token = session?.session?.access_token;
+                      
+                      const response = await fetch('/api/invoices/analyze', {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          Authorization: 'Bearer ' + token
+                        },
+                        body: JSON.stringify({ 
+                          fileData: reader.result
+                        })
+                      });
+                      
+                      if (response.ok) {
+                        const data = await response.json();
+                        console.log('[Invoice Analyze] AI response:', data);
+                        
+                        if (data.supplier_name) {
+                          setInvoiceSupplier(data.supplier_name);
+                          console.log('[Invoice Analyze] Auto-filled supplier:', data.supplier_name);
+                        }
+                        
+                        if (data.total_amount) {
+                          setInvoiceAmount(data.total_amount.toString());
+                          console.log('[Invoice Analyze] Auto-filled amount:', data.total_amount);
+                        }
+                        
+                        if (data.success) {
+                          alert('AI Analysis Complete! Please review and adjust the filled fields if needed.');
+                        } else {
+                          alert('AI could not extract data. Please fill fields manually.');
+                        }
+                      } else {
+                        console.error('[Invoice Analyze] API error');
+                        alert('AI analysis failed. Please fill fields manually.');
+                      }
+                    } catch (analyzeError) {
+                      console.error('[Invoice Analyze] Error:', analyzeError);
+                      alert('AI analysis failed. Please fill fields manually.');
+                    } finally {
+                      setIsAnalyzing(false);
+                    }
+                  };
+                  
+                  reader.onerror = () => {
+                    console.error('[Invoice Analyze] FileReader error');
+                    setIsAnalyzing(false);
+                    alert('Failed to read file. Please try again.');
+                  };
+                  
+                  reader.readAsDataURL(file);
+                  
+                } catch (error) {
+                  console.error('[Invoice Analyze] Outer error:', error);
+                  setIsAnalyzing(false);
+                  alert('AI analysis failed. Please fill fields manually.');
+                }
               }
             };
             
@@ -1010,7 +1207,7 @@ app.get('*', (c) => {
               ),
               showInvoiceUpload && h('div', { className: 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4' },
                 h('div', { className: 'bg-white rounded-2xl p-8 max-w-md w-full' },
-                  h('h2', { className: 'text-2xl font-bold text-gray-900 mb-6' }, 'Upload Invoice - Manual Entry'),
+                  h('h2', { className: 'text-2xl font-bold text-gray-900 mb-6' }, 'Upload Invoice - AI + Manual'),
                   h('div', { className: 'space-y-6' },
                     h('div', {},
                       h('label', { className: 'block text-sm font-medium text-gray-700 mb-2' }, 'Select Invoice File *'),
@@ -1019,11 +1216,15 @@ app.get('*', (c) => {
                         accept: 'image/*,application/pdf',
                         onChange: handleFileSelect,
                         className: 'w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition',
-                        disabled: uploading
+                        disabled: uploading || isAnalyzing
                       }),
                       selectedFile && h('p', { className: 'mt-2 text-sm text-green-600' },
                         '✓ Selected: ' + selectedFile.name
                       )
+                    ),
+                    isAnalyzing && h('div', { className: 'flex items-center gap-2 text-blue-600 bg-blue-50 p-4 rounded-lg' },
+                      h('div', { className: 'animate-spin text-2xl' }, '🤖'),
+                      h('span', {}, 'AI is analyzing invoice...')
                     ),
                     h('div', {},
                       h('label', { className: 'block text-sm font-medium text-gray-700 mb-2' }, 'Supplier Name *'),
@@ -1031,9 +1232,9 @@ app.get('*', (c) => {
                         type: 'text',
                         value: invoiceSupplier,
                         onChange: (e) => setInvoiceSupplier(e.target.value),
-                        placeholder: 'e.g., Google, Amazon, Bezeq',
+                        placeholder: isAnalyzing ? 'AI is filling...' : 'e.g., Google, Amazon, Bezeq',
                         className: 'w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition',
-                        disabled: uploading
+                        disabled: uploading || isAnalyzing
                       })
                     ),
                     h('div', {},
@@ -1042,15 +1243,17 @@ app.get('*', (c) => {
                         type: 'number',
                         value: invoiceAmount,
                         onChange: (e) => setInvoiceAmount(e.target.value),
-                        placeholder: 'e.g., 1500.00',
+                        placeholder: isAnalyzing ? 'AI is filling...' : 'e.g., 1500.00',
                         step: '0.01',
                         min: '0',
                         className: 'w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition',
-                        disabled: uploading
+                        disabled: uploading || isAnalyzing
                       })
                     ),
                     h('div', { className: 'text-sm text-gray-500' },
-                      'All fields are required. Enter supplier name and amount manually.'
+                      isAnalyzing 
+                        ? '🤖 AI is extracting data from your invoice...' 
+                        : 'AI will auto-fill fields when you select a file. Review and adjust if needed.'
                     ),
                     uploading && h('div', { className: 'flex items-center gap-2 text-indigo-600' },
                       h('div', { className: 'animate-spin text-2xl' }, '⚙️'),
@@ -1061,13 +1264,13 @@ app.get('*', (c) => {
                         type: 'button',
                         onClick: handleCancelInvoiceUpload,
                         className: 'flex-1 px-4 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition',
-                        disabled: uploading
+                        disabled: uploading || isAnalyzing
                       }, 'Cancel'),
                       h('button', {
                         type: 'button',
                         onClick: handleInvoiceUpload,
                         className: 'flex-1 px-4 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition disabled:opacity-50',
-                        disabled: uploading || !selectedFile || !invoiceSupplier.trim() || !invoiceAmount || parseFloat(invoiceAmount) <= 0
+                        disabled: uploading || isAnalyzing || !selectedFile || !invoiceSupplier.trim() || !invoiceAmount || parseFloat(invoiceAmount) <= 0
                       }, uploading ? '⏳ Uploading...' : '📤 Upload')
                     )
                   )
