@@ -197,89 +197,145 @@ app.get('/api/invoices', async (c) => {
   }
 })
 
-// Analyze invoice with OpenAI GPT-4o - AUTO EXTRACT
+// Analyze invoice with OpenAI GPT-4o - AUTO EXTRACT (Raw Fetch with Debug Logging)
 app.post('/api/invoices/analyze', async (c) => {
+  console.log('=== INVOICE ANALYZE START ===')
+  
   try {
-    console.log('[Invoice Analyze] Step 1: Starting AI analysis')
+    console.log('[Invoice Analyze] Step 1: Endpoint called')
     
-    const body = await c.req.json()
-    const fileData = body.fileData  // base64 data URL
+    // Check environment context
+    console.log('[Invoice Analyze] Environment check:')
+    console.log('  - c.env exists:', !!c.env)
+    console.log('  - c.env.OPENAI_API_KEY exists:', !!c.env?.OPENAI_API_KEY)
+    
+    // Parse request body
+    let body
+    try {
+      body = await c.req.json()
+      console.log('[Invoice Analyze] Step 2: Body parsed successfully')
+    } catch (parseError) {
+      console.error('[Invoice Analyze] Body parse error:', parseError)
+      return c.json({ 
+        error: 'Failed to parse request body', 
+        details: parseError.message 
+      }, 400)
+    }
+    
+    const fileData = body.fileData
     
     if (!fileData) {
-      console.error('[Invoice Analyze] No file data')
+      console.error('[Invoice Analyze] No file data in request')
       return c.json({ error: 'File data is required' }, 400)
     }
     
-    console.log('[Invoice Analyze] Step 2: Preparing OpenAI request')
+    console.log('[Invoice Analyze] Step 3: File data received (length:', fileData.length, ')')
     
     // Read OpenAI API Key from Cloudflare environment
-    const openaiApiKey = c.env.OPENAI_API_KEY
+    const openaiApiKey = c.env?.OPENAI_API_KEY
     
     if (!openaiApiKey) {
-      console.error('[Invoice Analyze] Missing OPENAI_API_KEY in Cloudflare Settings')
+      console.error('[Invoice Analyze] ❌ OPENAI_API_KEY not found in environment')
+      console.error('[Invoice Analyze] Available env keys:', Object.keys(c.env || {}))
       return c.json({ 
         error: 'Missing OPENAI_API_KEY in Cloudflare Settings',
+        hint: 'Add OPENAI_API_KEY in Cloudflare Dashboard → Settings → Environment Variables',
         supplier_name: null,
         total_amount: null
       }, 500)
     }
+    
+    console.log('[Invoice Analyze] ✓ API Key found (length:', openaiApiKey.length, ')')
+    console.log('[Invoice Analyze] Step 4: Preparing OpenAI API request')
     
     const systemPrompt = `Analyze this invoice image. Extract the 'supplier_name' (can be Hebrew/English) and 'total_amount'. 
 Return ONLY a JSON object: { "supplier_name": "...", "total_amount": 0.00 }. 
 If unsure, return null for that field.
 Do not include any markdown formatting, just return the raw JSON.`
 
-    console.log('[Invoice Analyze] Step 3: Calling OpenAI GPT-4o API')
-    
-    const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${openaiApiKey}`
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o',
-        messages: [
-          {
-            role: 'system',
-            content: systemPrompt
-          },
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: 'Extract supplier name and total amount from this invoice:'
-              },
-              {
-                type: 'image_url',
-                image_url: {
-                  url: fileData
-                }
+    const requestPayload = {
+      model: 'gpt-4o',
+      messages: [
+        {
+          role: 'system',
+          content: systemPrompt
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: 'Extract supplier name and total amount from this invoice:'
+            },
+            {
+              type: 'image_url',
+              image_url: {
+                url: fileData
               }
-            ]
-          }
-        ],
-        max_tokens: 300,
-        temperature: 0.1
+            }
+          ]
+        }
+      ],
+      max_tokens: 300,
+      temperature: 0.1
+    }
+    
+    console.log('[Invoice Analyze] Step 5: Calling OpenAI API...')
+    console.log('[Invoice Analyze] URL: https://api.openai.com/v1/chat/completions')
+    console.log('[Invoice Analyze] Model: gpt-4o')
+    
+    let openaiResponse
+    try {
+      openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${openaiApiKey}`
+        },
+        body: JSON.stringify(requestPayload)
       })
-    })
+      
+      console.log('[Invoice Analyze] Step 6: OpenAI responded with status:', openaiResponse.status)
+    } catch (fetchError) {
+      console.error('[Invoice Analyze] Fetch error:', fetchError)
+      return c.json({ 
+        error: 'Network error calling OpenAI', 
+        details: fetchError.message 
+      }, 500)
+    }
     
     if (!openaiResponse.ok) {
-      const errorText = await openaiResponse.text()
-      console.error('[Invoice Analyze] OpenAI API error:', errorText)
+      let errorText
+      try {
+        errorText = await openaiResponse.text()
+      } catch {
+        errorText = 'Unable to read error response'
+      }
+      console.error('[Invoice Analyze] ❌ OpenAI API error (status:', openaiResponse.status, ')')
+      console.error('[Invoice Analyze] Error details:', errorText)
       return c.json({ 
         error: 'OpenAI API error', 
+        status: openaiResponse.status,
         details: errorText 
       }, 500)
     }
     
-    const openaiData = await openaiResponse.json()
-    console.log('[Invoice Analyze] Step 4: OpenAI response received')
+    let openaiData
+    try {
+      openaiData = await openaiResponse.json()
+      console.log('[Invoice Analyze] Step 7: OpenAI response parsed successfully')
+    } catch (jsonError) {
+      console.error('[Invoice Analyze] Failed to parse OpenAI response:', jsonError)
+      return c.json({ 
+        error: 'Invalid JSON from OpenAI', 
+        details: jsonError.message 
+      }, 500)
+    }
     
     const content = openaiData.choices?.[0]?.message?.content
     if (!content) {
-      console.error('[Invoice Analyze] No content in OpenAI response')
+      console.error('[Invoice Analyze] ❌ No content in OpenAI response')
+      console.error('[Invoice Analyze] Full response:', JSON.stringify(openaiData))
       return c.json({ 
         error: 'No content from OpenAI',
         supplier_name: null,
@@ -287,7 +343,7 @@ Do not include any markdown formatting, just return the raw JSON.`
       }, 200)
     }
     
-    console.log('[Invoice Analyze] Raw content:', content)
+    console.log('[Invoice Analyze] Step 8: Raw content from GPT-4o:', content)
     
     // Parse JSON response
     try {
@@ -300,7 +356,8 @@ Do not include any markdown formatting, just return the raw JSON.`
       }
       
       const extracted = JSON.parse(jsonStr)
-      console.log('[Invoice Analyze] Step 5: Extracted data:', extracted)
+      console.log('[Invoice Analyze] ✓ Step 9: Successfully extracted:', extracted)
+      console.log('=== INVOICE ANALYZE SUCCESS ===')
       
       return c.json({
         success: true,
@@ -309,7 +366,7 @@ Do not include any markdown formatting, just return the raw JSON.`
       })
       
     } catch (parseError: any) {
-      console.error('[Invoice Analyze] JSON parse error:', parseError.message)
+      console.error('[Invoice Analyze] ❌ JSON parse error:', parseError.message)
       console.error('[Invoice Analyze] Content was:', content)
       return c.json({ 
         error: 'Failed to parse OpenAI response',
@@ -321,13 +378,16 @@ Do not include any markdown formatting, just return the raw JSON.`
     }
     
   } catch (error: any) {
-    console.error('[Invoice Analyze] CRITICAL ERROR:', error.message, error.stack)
+    console.error('=== INVOICE ANALYZE CRITICAL ERROR ===')
+    console.error('[Invoice Analyze] Error message:', error.message)
+    console.error('[Invoice Analyze] Error stack:', error.stack)
     return c.json({ 
       error: 'Internal server error', 
       message: error.message,
+      stack: error.stack,
       supplier_name: null,
       total_amount: null
-    }, 200)
+    }, 500)
   }
 })
 
