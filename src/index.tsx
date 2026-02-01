@@ -8,6 +8,7 @@ import type { Document, Invoice } from './types/database'
 type Bindings = {
   SUPABASE_URL: string
   SUPABASE_ANON_KEY: string
+  OPENAI_API_KEY: string
 }
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -211,8 +212,17 @@ app.post('/api/invoices/analyze', async (c) => {
     
     console.log('[Invoice Analyze] Step 2: Preparing OpenAI request')
     
-    // HARDCODED OpenAI API Key
-    const openaiApiKey = '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'
+    // Read OpenAI API Key from Cloudflare environment
+    const openaiApiKey = c.env.OPENAI_API_KEY
+    
+    if (!openaiApiKey) {
+      console.error('[Invoice Analyze] Missing OPENAI_API_KEY in Cloudflare Settings')
+      return c.json({ 
+        error: 'Missing OPENAI_API_KEY in Cloudflare Settings',
+        supplier_name: null,
+        total_amount: null
+      }, 500)
+    }
     
     const systemPrompt = `Analyze this invoice image. Extract the 'supplier_name' (can be Hebrew/English) and 'total_amount'. 
 Return ONLY a JSON object: { "supplier_name": "...", "total_amount": 0.00 }. 
