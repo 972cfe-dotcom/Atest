@@ -196,19 +196,23 @@ app.get('/api/invoices', async (c) => {
   }
 })
 
-// Upload and process invoice - REAL FILE UPLOAD TO STORAGE
+// Upload and process invoice - MANUAL ENTRY MODE
 app.post('/api/invoices/upload', async (c) => {
   try {
-    console.log('[Invoice Upload] Step 1: Starting REAL file upload')
+    console.log('[Invoice Upload] Step 1: Starting MANUAL ENTRY upload')
     
     console.log('[Invoice Upload] Step 2: Parsing JSON body')
     const body = await c.req.json()
     const fileName = body.fileName || 'invoice.pdf'
     const userId = body.userId
     const fileData = body.fileData  // base64 data URL
+    const supplierName = body.supplierName  // MANUAL INPUT from user
+    const totalAmount = body.totalAmount    // MANUAL INPUT from user
     
     console.log('[Invoice Upload] Step 3: User ID from request:', userId)
     console.log('[Invoice Upload] File name:', fileName)
+    console.log('[Invoice Upload] Supplier name (manual):', supplierName)
+    console.log('[Invoice Upload] Total amount (manual):', totalAmount)
     console.log('[Invoice Upload] File data type:', typeof fileData)
     
     if (!userId) {
@@ -219,6 +223,16 @@ app.post('/api/invoices/upload', async (c) => {
     if (!fileData) {
       console.error('[Invoice Upload] No file data in request body')
       return c.json({ error: 'File data is required' }, 400)
+    }
+    
+    if (!supplierName || !supplierName.trim()) {
+      console.error('[Invoice Upload] No supplier name in request body')
+      return c.json({ error: 'Supplier name is required' }, 400)
+    }
+    
+    if (!totalAmount || totalAmount <= 0) {
+      console.error('[Invoice Upload] Invalid total amount in request body')
+      return c.json({ error: 'Valid total amount is required' }, 400)
     }
     
     console.log('[Invoice Upload] Step 4: Creating Supabase client with SERVICE ROLE KEY')
@@ -282,23 +296,19 @@ app.post('/api/invoices/upload', async (c) => {
     const publicUrl = `${supabaseUrl}/storage/v1/object/public/invoices/${storagePath}`
     console.log('[Invoice Upload] Step 7: Public URL:', publicUrl)
 
-    // Mock AI extraction
-    console.log('[Invoice Upload] Step 8: Generating mock invoice data')
-    const suppliers = ['Google', 'Amazon', 'Bezeq']
-    const supplier_name = suppliers[Math.floor(Math.random() * suppliers.length)]
-    const total_amount = parseFloat((Math.random() * 4850 + 150).toFixed(2))
-    
-    console.log('[Invoice Upload] Mock extraction result:', { supplier_name, total_amount })
+    // Use MANUAL INPUT (no mock data)
+    console.log('[Invoice Upload] Step 8: Using MANUAL INPUT (no mock data)')
+    console.log('[Invoice Upload] User provided:', { supplier_name: supplierName, total_amount: totalAmount })
 
-    // Insert into database with REAL file URL
-    console.log('[Invoice Upload] Step 9: Inserting into database with REAL file URL')
+    // Insert into database with REAL file URL and MANUAL DATA
+    console.log('[Invoice Upload] Step 9: Inserting into database with REAL file URL and MANUAL data')
     const { data: invoice, error: insertError } = await supabase
       .from('invoices')
       .insert({
         user_id: userId,
-        supplier_name: supplier_name,
-        total_amount: total_amount,
-        file_url: publicUrl,  // REAL URL from storage
+        supplier_name: supplierName.trim(),  // USER INPUT (not mock)
+        total_amount: totalAmount,            // USER INPUT (not mock)
+        file_url: publicUrl,                  // REAL URL from storage
         status: 'processed'
       })
       .select()
@@ -321,6 +331,8 @@ app.post('/api/invoices/upload', async (c) => {
 
     console.log('[Invoice Upload] Step 10: SUCCESS! Invoice created:', invoice.id)
     console.log('[Invoice Upload] File URL in database:', invoice.file_url)
+    console.log('[Invoice Upload] Supplier in database:', invoice.supplier_name)
+    console.log('[Invoice Upload] Amount in database:', invoice.total_amount)
     
     return c.json({ 
       success: true,
@@ -545,6 +557,8 @@ app.get('*', (c) => {
             const [uploading, setUploading] = useState(false);
             const [processingId, setProcessingId] = useState(null);
             const [selectedFile, setSelectedFile] = useState(null);
+            const [invoiceSupplier, setInvoiceSupplier] = useState('');
+            const [invoiceAmount, setInvoiceAmount] = useState('');
             
             useEffect(() => {
               if (activeTab === 'documents') {
@@ -603,13 +617,35 @@ app.get('*', (c) => {
               }
             };
             
+            const handleCancelInvoiceUpload = () => {
+              console.log('[Invoice Upload] Cancel clicked - resetting form');
+              setShowInvoiceUpload(false);
+              setSelectedFile(null);
+              setInvoiceSupplier('');
+              setInvoiceAmount('');
+            };
+            
             const handleInvoiceUpload = async () => {
               console.log('[Invoice Upload] Upload button clicked');
               console.log('[Invoice Upload] Selected file:', selectedFile);
+              console.log('[Invoice Upload] Supplier name:', invoiceSupplier);
+              console.log('[Invoice Upload] Total amount:', invoiceAmount);
               
               if (!selectedFile) {
                 console.error('[Invoice Upload] No file selected');
                 alert('Please select a file first');
+                return;
+              }
+              
+              if (!invoiceSupplier.trim()) {
+                console.error('[Invoice Upload] No supplier name');
+                alert('Please enter supplier name');
+                return;
+              }
+              
+              if (!invoiceAmount || parseFloat(invoiceAmount) <= 0) {
+                console.error('[Invoice Upload] Invalid amount');
+                alert('Please enter a valid amount');
                 return;
               }
               
@@ -643,7 +679,6 @@ app.get('*', (c) => {
                 }
                 
                 console.log('[Invoice Upload] Reading file as base64');
-                // Convert file to base64 for demo purposes
                 const reader = new FileReader();
                 reader.onloadend = async () => {
                   console.log('[Invoice Upload] File read complete, sending to API');
@@ -658,7 +693,9 @@ app.get('*', (c) => {
                       body: JSON.stringify({ 
                         fileName: selectedFile.name,
                         fileData: reader.result,
-                        userId: user.id  // CRITICAL: Pass user ID explicitly
+                        userId: user.id,
+                        supplierName: invoiceSupplier.trim(),
+                        totalAmount: parseFloat(invoiceAmount)
                       })
                     });
                     
@@ -668,8 +705,7 @@ app.get('*', (c) => {
                       const data = await response.json();
                       console.log('[Invoice Upload] Success! Invoice data:', data);
                       setInvoices([data.invoice, ...invoices]);
-                      setShowInvoiceUpload(false);
-                      setSelectedFile(null);
+                      handleCancelInvoiceUpload();
                       alert('Invoice uploaded successfully!');
                     } else {
                       const errorData = await response.json();
@@ -944,10 +980,10 @@ app.get('*', (c) => {
               ),
               showInvoiceUpload && h('div', { className: 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4' },
                 h('div', { className: 'bg-white rounded-2xl p-8 max-w-md w-full' },
-                  h('h2', { className: 'text-2xl font-bold text-gray-900 mb-6' }, 'Upload Invoice'),
+                  h('h2', { className: 'text-2xl font-bold text-gray-900 mb-6' }, 'Upload Invoice - Manual Entry'),
                   h('div', { className: 'space-y-6' },
                     h('div', {},
-                      h('label', { className: 'block text-sm font-medium text-gray-700 mb-2' }, 'Select Invoice File'),
+                      h('label', { className: 'block text-sm font-medium text-gray-700 mb-2' }, 'Select Invoice File *'),
                       h('input', {
                         type: 'file',
                         accept: 'image/*,application/pdf',
@@ -959,21 +995,41 @@ app.get('*', (c) => {
                         '✓ Selected: ' + selectedFile.name
                       )
                     ),
+                    h('div', {},
+                      h('label', { className: 'block text-sm font-medium text-gray-700 mb-2' }, 'Supplier Name *'),
+                      h('input', {
+                        type: 'text',
+                        value: invoiceSupplier,
+                        onChange: (e) => setInvoiceSupplier(e.target.value),
+                        placeholder: 'e.g., Google, Amazon, Bezeq',
+                        className: 'w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition',
+                        disabled: uploading
+                      })
+                    ),
+                    h('div', {},
+                      h('label', { className: 'block text-sm font-medium text-gray-700 mb-2' }, 'Total Amount *'),
+                      h('input', {
+                        type: 'number',
+                        value: invoiceAmount,
+                        onChange: (e) => setInvoiceAmount(e.target.value),
+                        placeholder: 'e.g., 1500.00',
+                        step: '0.01',
+                        min: '0',
+                        className: 'w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition',
+                        disabled: uploading
+                      })
+                    ),
                     h('div', { className: 'text-sm text-gray-500' },
-                      'Upload an invoice image or PDF. AI will automatically extract supplier name and amount.'
+                      'All fields are required. Enter supplier name and amount manually.'
                     ),
                     uploading && h('div', { className: 'flex items-center gap-2 text-indigo-600' },
                       h('div', { className: 'animate-spin text-2xl' }, '⚙️'),
-                      h('span', {}, 'Processing invoice...')
+                      h('span', {}, 'Uploading invoice...')
                     ),
                     h('div', { className: 'flex gap-4' },
                       h('button', {
                         type: 'button',
-                        onClick: () => {
-                          console.log('[Invoice Upload] Cancel clicked');
-                          setShowInvoiceUpload(false);
-                          setSelectedFile(null);
-                        },
+                        onClick: handleCancelInvoiceUpload,
                         className: 'flex-1 px-4 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition',
                         disabled: uploading
                       }, 'Cancel'),
@@ -981,7 +1037,7 @@ app.get('*', (c) => {
                         type: 'button',
                         onClick: handleInvoiceUpload,
                         className: 'flex-1 px-4 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition disabled:opacity-50',
-                        disabled: uploading || !selectedFile
+                        disabled: uploading || !selectedFile || !invoiceSupplier.trim() || !invoiceAmount || parseFloat(invoiceAmount) <= 0
                       }, uploading ? '⏳ Uploading...' : '📤 Upload')
                     )
                   )
