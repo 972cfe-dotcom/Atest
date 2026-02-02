@@ -404,6 +404,110 @@ Do not include Markdown formatting.`
     }, 500)
   }
 })
+
+// DEBUG ENDPOINT: Test ClickSend SMS Integration
+app.get('/api/test-sms', async (c) => {
+  console.log('=== CLICKSEND DEBUG TEST START ===')
+  
+  try {
+    // Step 1: Check environment variables
+    const clicksendUsername = c.env?.CLICKSEND_USERNAME
+    const clicksendApiKey = c.env?.CLICKSEND_API_KEY
+    const adminPhone = c.env?.ADMIN_PHONE_NUMBER
+    
+    console.log('[ClickSend Debug] Environment check:')
+    console.log('[ClickSend Debug] - Username exists:', !!clicksendUsername)
+    console.log('[ClickSend Debug] - API Key exists:', !!clicksendApiKey)
+    console.log('[ClickSend Debug] - Admin Phone exists:', !!adminPhone)
+    console.log('[ClickSend Debug] - Admin Phone value:', adminPhone || 'MISSING')
+    
+    if (!clicksendUsername || !clicksendApiKey || !adminPhone) {
+      return c.json({
+        error: 'Missing credentials',
+        debug: {
+          username_exists: !!clicksendUsername,
+          api_key_exists: !!clicksendApiKey,
+          admin_phone_exists: !!adminPhone,
+          admin_phone_value: adminPhone || 'MISSING',
+          available_env_keys: Object.keys(c.env || {})
+        }
+      }, 400)
+    }
+    
+    // Step 2: Create Basic Auth credentials
+    console.log('[ClickSend Debug] Creating Basic Auth credentials...')
+    const credentials = btoa(`${clicksendUsername}:${clicksendApiKey}`)
+    console.log('[ClickSend Debug] Credentials created (length):', credentials.length)
+    
+    // Step 3: Prepare test SMS payload
+    const testMessage = 'Hello from Invoice App! 📱 This is a test message from ClickSend API.'
+    console.log('[ClickSend Debug] Test message:', testMessage)
+    console.log('[ClickSend Debug] Sending to:', adminPhone)
+    
+    const payload = {
+      messages: [
+        {
+          source: 'invoice-app-debug',
+          body: testMessage,
+          to: adminPhone
+        }
+      ]
+    }
+    
+    console.log('[ClickSend Debug] Payload:', JSON.stringify(payload, null, 2))
+    
+    // Step 4: Send request to ClickSend API
+    console.log('[ClickSend Debug] Sending request to ClickSend API...')
+    const response = await fetch('https://rest.clicksend.com/v3/sms/send', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Basic ${credentials}`
+      },
+      body: JSON.stringify(payload)
+    })
+    
+    console.log('[ClickSend Debug] Response status:', response.status)
+    console.log('[ClickSend Debug] Response status text:', response.statusText)
+    
+    // Step 5: Parse response body
+    const responseText = await response.text()
+    console.log('[ClickSend Debug] Raw response:', responseText)
+    
+    let responseBody
+    try {
+      responseBody = JSON.parse(responseText)
+    } catch (e) {
+      responseBody = { raw_text: responseText }
+    }
+    
+    // Step 6: Return FULL response to user
+    console.log('=== CLICKSEND DEBUG TEST END ===')
+    
+    return c.json({
+      test_status: response.ok ? 'SUCCESS' : 'FAILED',
+      http_status: response.status,
+      http_status_text: response.statusText,
+      clicksend_response: responseBody,
+      debug_info: {
+        phone_number_used: adminPhone,
+        message_sent: testMessage,
+        credentials_length: credentials.length,
+        api_endpoint: 'https://rest.clicksend.com/v3/sms/send'
+      }
+    }, response.status)
+    
+  } catch (error: any) {
+    console.error('[ClickSend Debug] CRITICAL ERROR:', error.message, error.stack)
+    return c.json({
+      error: 'Debug test failed',
+      message: error.message,
+      stack: error.stack,
+      type: error.constructor.name
+    }, 500)
+  }
+})
+
 // Upload and process invoice - MANUAL ENTRY MODE
 // Get all invoices for the current user
 app.get('/api/invoices', async (c) => {
