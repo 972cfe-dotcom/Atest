@@ -10,6 +10,9 @@ type Bindings = {
   SUPABASE_ANON_KEY: string
   OPENAI_API_KEY: string
   GOOGLE_API_KEY: string
+  CLICKSEND_USERNAME: string
+  CLICKSEND_API_KEY: string
+  ADMIN_PHONE_NUMBER: string
 }
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -620,6 +623,52 @@ app.post('/api/invoices/upload', async (c) => {
     console.log('[Invoice Upload] File URL in database:', invoice.file_url)
     console.log('[Invoice Upload] Supplier in database:', invoice.supplier_name)
     console.log('[Invoice Upload] Amount in database:', invoice.total_amount)
+    
+    // Step 12: Send SMS notification via ClickSend (fire and forget)
+    console.log('[Invoice Upload] Step 12: Sending SMS notification via ClickSend')
+    try {
+      const clicksendUsername = c.env?.CLICKSEND_USERNAME
+      const clicksendApiKey = c.env?.CLICKSEND_API_KEY
+      const adminPhone = c.env?.ADMIN_PHONE_NUMBER
+      
+      if (clicksendUsername && clicksendApiKey && adminPhone) {
+        console.log('[ClickSend] Credentials found, sending SMS...')
+        
+        // Create Basic Auth credentials (base64 encoded username:api_key)
+        const credentials = btoa(`${clicksendUsername}:${clicksendApiKey}`)
+        
+        const smsBody = `New Invoice Uploaded! 📄\nSupplier: ${supplierName}\nAmount: ${totalAmount} ₪\nFile: ${invoice.file_url}`
+        
+        const response = await fetch('https://rest.clicksend.com/v3/sms/send', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Basic ${credentials}`
+          },
+          body: JSON.stringify({
+            messages: [
+              {
+                source: 'invoice-app',
+                body: smsBody,
+                to: adminPhone
+              }
+            ]
+          })
+        })
+        
+        if (response.ok) {
+          const data = await response.json()
+          console.log('[ClickSend] SMS sent successfully:', data)
+        } else {
+          const errorText = await response.text()
+          console.error('[ClickSend] SMS failed:', response.status, errorText)
+        }
+      } else {
+        console.log('[ClickSend] Skipping SMS - missing credentials (username, api_key, or phone)')
+      }
+    } catch (smsError: any) {
+      console.error('[ClickSend] SMS error (non-blocking):', smsError.message)
+    }
     
     return c.json({ 
       success: true,
