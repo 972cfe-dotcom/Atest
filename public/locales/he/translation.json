@@ -1,0 +1,102 @@
+{
+  "common": {
+    "loading": "טוען...",
+    "error": "שגיאה",
+    "success": "הצלחה",
+    "cancel": "ביטול",
+    "save": "שמור",
+    "delete": "מחק",
+    "edit": "ערוך",
+    "create": "צור",
+    "close": "סגור",
+    "logout": "התנתק",
+    "email": "דוא\"ל",
+    "password": "סיסמה"
+  },
+  "auth": {
+    "signIn": "התחבר",
+    "signUp": "הרשם",
+    "signInTitle": "ברוכים השבים",
+    "signUpTitle": "צור חשבון",
+    "signInSubtitle": "התחבר לחשבונך",
+    "signUpSubtitle": "הירשם כדי להתחיל לעבד מסמכים",
+    "alreadyHaveAccount": "כבר יש לך חשבון? התחבר",
+    "noAccount": "אין לך חשבון? הירשם",
+    "signInButton": "התחבר",
+    "signUpButton": "צור חשבון",
+    "authFailed": "האימות נכשל"
+  },
+  "landing": {
+    "title": "עיבוד מסמכים חכם",
+    "subtitle": "העלה, נהל וטפל במסמכים שלך בקלות",
+    "getStarted": "התחל עכשיו"
+  },
+  "sidebar": {
+    "createOrganization": "צור ארגון",
+    "organizations": "ארגונים",
+    "organization": "ארגון",
+    "noOrganization": "אין ארגון"
+  },
+  "navigation": {
+    "dashboard": "לוח בקרה",
+    "smartProcurement": "רכש חכם",
+    "employees": "עובדים",
+    "settings": "הגדרות",
+    "comingSoon": "בקרוב"
+  },
+  "organization": {
+    "createTitle": "צור ארגון",
+    "createSubtitle": "הגדר את הארגון החדש שלך כדי להתחיל",
+    "name": "שם הארגון",
+    "namePlaceholder": "החברה שלי בע\"מ",
+    "taxId": "מספר עוסק (אופציונלי)",
+    "taxIdPlaceholder": "123456789",
+    "nameRequired": "שם הארגון נדרש",
+    "creating": "יוצר...",
+    "createButton": "צור ארגון",
+    "missingCredentials": "חסרים פרטים",
+    "createFailed": "יצירת הארגון נכשלה"
+  },
+  "invoices": {
+    "title": "חשבוניות",
+    "uploadInvoice": "העלה חשבונית",
+    "viewInvoice": "צפה בחשבונית",
+    "downloadInvoice": "הורד חשבונית",
+    "supplier": "ספק",
+    "totalAmount": "סכום כולל",
+    "date": "תאריך",
+    "status": "סטטוס",
+    "fileName": "שם קובץ",
+    "supplierName": "שם הספק",
+    "amount": "סכום",
+    "selectFile": "בחר קובץ",
+    "analyzeWithAI": "ניתוח עם AI",
+    "upload": "העלה",
+    "uploading": "מעלה...",
+    "uploadSuccess": "החשבונית הועלתה בהצלחה!",
+    "uploadFailed": "העלאה נכשלה",
+    "noFileSelected": "אנא בחר קובץ תחילה",
+    "enterSupplier": "אנא הזן שם ספק",
+    "enterAmount": "אנא הזן סכום תקין",
+    "pdfPreview": "תצוגת PDF",
+    "imagePreview": "תצוגת תמונה",
+    "processed": "מעובד"
+  },
+  "documents": {
+    "title": "מסמכים",
+    "uploadDocument": "העלה מסמך",
+    "noDocuments": "אין מסמכים עדיין"
+  },
+  "profile": {
+    "role": "תפקיד",
+    "owner": "בעלים",
+    "admin": "מנהל",
+    "member": "חבר"
+  },
+  "errors": {
+    "unauthorized": "לא מורשה",
+    "networkError": "שגיאת רשת",
+    "serverError": "שגיאת שרת",
+    "notFound": "לא נמצא"
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "common": {
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success",
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "edit": "Edit",
+    "create": "Create",
+    "close": "Close",
+    "logout": "Logout",
+    "email": "Email",
+    "password": "Password"
+  },
+  "auth": {
+    "signIn": "Sign In",
+    "signUp": "Sign Up",
+    "signInTitle": "Welcome Back",
+    "signUpTitle": "Create Account",
+    "signInSubtitle": "Sign in to your account",
+    "signUpSubtitle": "Sign up to start processing documents",
+    "alreadyHaveAccount": "Already have an account? Sign in",
+    "noAccount": "Don't have an account? Sign up",
+    "signInButton": "Sign In",
+    "signUpButton": "Create Account",
+    "authFailed": "Authentication failed"
+  },
+  "landing": {
+    "title": "Smart Document Processing",
+    "subtitle": "Upload, manage, and process your documents with ease",
+    "getStarted": "Get Started Now"
+  },
+  "sidebar": {
+    "createOrganization": "Create Organization",
+    "organizations": "Organizations",
+    "organization": "Organization",
+    "noOrganization": "No Organization"
+  },
+  "navigation": {
+    "dashboard": "Dashboard",
+    "smartProcurement": "Smart Procurement",
+    "employees": "Employees",
+    "settings": "Settings",
+    "comingSoon": "Soon"
+  },
+  "organization": {
+    "createTitle": "Create Organization",
+    "createSubtitle": "Set up your new organization to get started",
+    "name": "Organization Name",
+    "namePlaceholder": "My Company Ltd.",
+    "taxId": "Tax ID (Optional)",
+    "taxIdPlaceholder": "123456789",
+    "nameRequired": "Organization name is required",
+    "creating": "Creating...",
+    "createButton": "Create Organization",
+    "missingCredentials": "Missing credentials",
+    "createFailed": "Failed to create organization"
+  },
+  "invoices": {
+    "title": "Invoices",
+    "uploadInvoice": "Upload Invoice",
+    "viewInvoice": "View Invoice",
+    "downloadInvoice": "Download Invoice",
+    "supplier": "Supplier",
+    "totalAmount": "Total Amount",
+    "date": "Date",
+    "status": "Status",
+    "fileName": "File Name",
+    "supplierName": "Supplier Name",
+    "amount": "Amount",
+    "selectFile": "Select File",
+    "analyzeWithAI": "Analyze with AI",
+    "upload": "Upload",
+    "uploading": "Uploading...",
+    "uploadSuccess": "Invoice uploaded successfully!",
+    "uploadFailed": "Upload failed",
+    "noFileSelected": "Please select a file first",
+    "enterSupplier": "Please enter supplier name",
+    "enterAmount": "Please enter a valid amount",
+    "pdfPreview": "PDF Preview",
+    "imagePreview": "Image Preview",
+    "processed": "Processed"
+  },
+  "documents": {
+    "title": "Documents",
+    "uploadDocument": "Upload Document",
+    "noDocuments": "No documents yet"
+  },
+  "profile": {
+    "role": "Role",
+    "owner": "Owner",
+    "admin": "Admin",
+    "member": "Member"
+  },
+  "errors": {
+    "unauthorized": "Unauthorized",
+    "networkError": "Network error",
+    "serverError": "Server error",
+    "notFound": "Not found"
+  }
+}

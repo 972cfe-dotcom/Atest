@@ -976,11 +976,11 @@ app.get('*', (c) => {
 
   return c.html(`
     <!DOCTYPE html>
-    <html lang="en">
+    <html lang="he" dir="rtl" id="html-root">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>SaaS Document Processor</title>
+        <title>מעבד מסמכים חכם</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <script>
           window.__SUPABASE_URL__ = "${supabaseUrl}";
@@ -994,11 +994,30 @@ app.get('*', (c) => {
         <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
         <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+        <script src="https://cdn.jsdelivr.net/npm/i18next@23/dist/umd/i18next.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/react-i18next@13/dist/umd/react-i18next.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/i18next-http-backend@2/i18nextHttpBackend.min.js"></script>
         
         <!-- Inline React Application -->
         <script type="module">
           const { useState, useEffect, createElement: h } = React;
           const { createClient } = supabase;
+          const { useTranslation, I18nextProvider } = ReactI18next;
+          
+          // Initialize i18next
+          i18next
+            .use(i18nextHttpBackend)
+            .init({
+              lng: 'he', // Default to Hebrew
+              fallbackLng: 'en',
+              debug: false,
+              backend: {
+                loadPath: '/locales/{{lng}}/translation.json'
+              },
+              interpolation: {
+                escapeValue: false
+              }
+            });
           
           // Create Supabase client with hardcoded credentials
           const supabaseClient = createClient(window.__SUPABASE_URL__, window.__SUPABASE_ANON_KEY__);
@@ -1323,8 +1342,37 @@ app.get('*', (c) => {
             );
           }
           
+          // Language Switcher Component
+          function LanguageSwitcher() {
+            const { i18n } = useTranslation();
+            const [currentLang, setCurrentLang] = useState(i18n.language || 'he');
+            
+            const toggleLanguage = () => {
+              const newLang = currentLang === 'he' ? 'en' : 'he';
+              i18n.changeLanguage(newLang);
+              setCurrentLang(newLang);
+              
+              // Update HTML dir and lang attributes
+              const htmlRoot = document.getElementById('html-root');
+              if (htmlRoot) {
+                htmlRoot.setAttribute('lang', newLang);
+                htmlRoot.setAttribute('dir', newLang === 'he' ? 'rtl' : 'ltr');
+              }
+            };
+            
+            return h('button', {
+              onClick: toggleLanguage,
+              className: 'p-2 rounded-lg bg-gray-100 hover:bg-gray-200 transition flex items-center gap-2 text-sm font-medium',
+              title: currentLang === 'he' ? 'Switch to English' : 'עבור לעברית'
+            },
+              h('span', { className: 'text-lg' }, currentLang === 'he' ? '🇮🇱' : '🇺🇸'),
+              h('span', {}, currentLang === 'he' ? 'עברית' : 'English')
+            );
+          }
+          
           // App Layout with Sidebar
           function AppLayout({ children, user, onSignOut }) {
+            const { t } = useTranslation();
             const orgContext = React.useContext(OrganizationContext);
             const [isSidebarOpen, setIsSidebarOpen] = useState(true);
             const [currentView, setCurrentView] = useState('dashboard');
@@ -1352,22 +1400,25 @@ app.get('*', (c) => {
             };
             
             return h('div', { className: 'min-h-screen bg-gray-50 flex' },
-              // Sidebar
+              // Sidebar (RTL-aware: will flip to right side automatically)
               h('div', { 
-                className: 'fixed inset-y-0 left-0 w-64 bg-white border-r border-gray-200 flex flex-col shadow-lg z-40',
+                className: 'fixed inset-y-0 start-0 w-64 bg-white border-e border-gray-200 flex flex-col shadow-lg z-40',
                 style: { transition: 'transform 0.3s ease' }
               },
-                // Top: Organization Switcher
+                // Top: Organization Switcher + Language Switcher
                 h('div', { className: 'p-4 border-b border-gray-200' },
                   h('div', { className: 'flex items-center gap-3 mb-2' },
                     h('div', { className: 'w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center text-xl font-bold text-indigo-600' },
                       currentOrg?.name?.charAt(0) || '🏢'
                     ),
                     h('div', { className: 'flex-1 min-w-0' },
-                      h('div', { className: 'font-semibold text-gray-900 truncate' }, currentOrg?.name || 'No Organization'),
-                      h('div', { className: 'text-xs text-gray-500' }, organizations.length + ' organization' + (organizations.length !== 1 ? 's' : ''))
+                      h('div', { className: 'font-semibold text-gray-900 truncate' }, currentOrg?.name || t('sidebar.noOrganization')),
+                      h('div', { className: 'text-xs text-gray-500' }, organizations.length + ' ' + t('sidebar.organizations'))
                     )
                   ),
+                  
+                  // Language Switcher
+                  h('div', { className: 'mb-2' }, h(LanguageSwitcher)),
                   
                   // Organization Dropdown
                   organizations.length > 1 && h('select', {
@@ -1387,7 +1438,7 @@ app.get('*', (c) => {
                   h('button', {
                     onClick: () => setShowCreateModal(true),
                     className: 'w-full mt-2 px-3 py-2 text-sm bg-indigo-50 text-indigo-600 font-medium rounded-lg hover:bg-indigo-100 transition flex items-center justify-center gap-2'
-                  }, '+ Create Organization')
+                  }, '+ ' + t('sidebar.createOrganization'))
                 ),
                 
                 // Middle: Navigation Menu
@@ -1398,7 +1449,7 @@ app.get('*', (c) => {
                     className: 'flex items-center gap-3 px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition ' + (currentView === 'dashboard' ? 'bg-indigo-50 text-indigo-600 font-medium' : '')
                   },
                     h('span', { className: 'text-xl' }, '📊'),
-                    h('span', {}, 'Dashboard')
+                    h('span', {}, t('navigation.dashboard'))
                   ),
                   
                   h('a', {
@@ -1407,7 +1458,7 @@ app.get('*', (c) => {
                     className: 'flex items-center gap-3 px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition ' + (currentView === 'invoices' ? 'bg-indigo-50 text-indigo-600 font-medium' : '')
                   },
                     h('span', { className: 'text-xl' }, '📄'),
-                    h('span', {}, 'Smart Procurement')
+                    h('span', {}, t('navigation.smartProcurement'))
                   ),
                   
                   h('a', {
@@ -1416,8 +1467,8 @@ app.get('*', (c) => {
                     className: 'flex items-center gap-3 px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition ' + (currentView === 'employees' ? 'bg-indigo-50 text-indigo-600 font-medium' : '')
                   },
                     h('span', { className: 'text-xl' }, '👥'),
-                    h('span', {}, 'Employees'),
-                    h('span', { className: 'ml-auto text-xs bg-gray-200 text-gray-600 px-2 py-1 rounded-full' }, 'Soon')
+                    h('span', {}, t('navigation.employees')),
+                    h('span', { className: 'ms-auto text-xs bg-gray-200 text-gray-600 px-2 py-1 rounded-full' }, t('navigation.comingSoon'))
                   ),
                   
                   h('a', {
@@ -1426,7 +1477,7 @@ app.get('*', (c) => {
                     className: 'flex items-center gap-3 px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition ' + (currentView === 'settings' ? 'bg-indigo-50 text-indigo-600 font-medium' : '')
                   },
                     h('span', { className: 'text-xl' }, '⚙️'),
-                    h('span', {}, 'Settings')
+                    h('span', {}, t('navigation.settings'))
                   )
                 ),
                 
@@ -1438,18 +1489,18 @@ app.get('*', (c) => {
                     ),
                     h('div', { className: 'flex-1 min-w-0' },
                       h('div', { className: 'font-medium text-gray-900 truncate text-sm' }, user?.email || 'User'),
-                      h('div', { className: 'text-xs text-gray-500' }, currentOrg?.role || 'Member')
+                      h('div', { className: 'text-xs text-gray-500' }, t('profile.' + (currentOrg?.role || 'member')))
                     )
                   ),
                   h('button', {
                     onClick: onSignOut,
                     className: 'w-full px-4 py-2 text-sm bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 transition flex items-center justify-center gap-2'
-                  }, '🚪 Logout')
+                  }, '🚪 ' + t('common.logout'))
                 )
               ),
               
-              // Main Content Area
-              h('div', { className: 'flex-1 ml-64' },
+              // Main Content Area (RTL-aware: margin flips automatically)
+              h('div', { className: 'flex-1 ms-64' },
                 h('div', { className: 'p-8' },
                   React.cloneElement(children, { currentView, setCurrentView, currentOrg })
                 )
@@ -2209,9 +2260,9 @@ app.get('*', (c) => {
             );
           }
           
-          // Render app
+          // Render app with i18n provider
           const root = ReactDOM.createRoot(document.getElementById('root'));
-          root.render(h(App));
+          root.render(h(I18nextProvider, { i18n: i18next }, h(App)));
         </script>
     </body>
     </html>
