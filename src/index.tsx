@@ -508,6 +508,146 @@ app.get('/api/test-sms', async (c) => {
   }
 })
 
+// ====== ORGANIZATION MANAGEMENT ENDPOINTS ======
+
+// Get user's organizations
+app.get('/api/organizations', async (c) => {
+  try {
+    console.log('[Organizations] Fetching user organizations')
+    
+    const authHeader = c.req.header('Authorization')
+    if (!authHeader) {
+      return c.json({ error: 'Unauthorized' }, 401)
+    }
+    
+    const token = authHeader.replace('Bearer ', '')
+    const supabaseUrl = 'https://dmnxblcdaqnenggfyurw.supabase.co'
+    const supabaseServiceKey = 'sb_secret_ZpY2INapqj8cym1xdRjYGA_CJiBL0Eh'
+    const supabase = createClient(supabaseUrl, supabaseServiceKey)
+    
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token)
+    if (authError || !user) {
+      return c.json({ error: 'Unauthorized' }, 401)
+    }
+    
+    console.log('[Organizations] User verified:', user.id)
+    
+    // Fetch organizations via organization_members join
+    const { data: memberships, error: fetchError } = await supabase
+      .from('organization_members')
+      .select(`
+        role,
+        organizations (
+          id,
+          name,
+          tax_id,
+          created_at
+        )
+      `)
+      .eq('user_id', user.id)
+    
+    if (fetchError) {
+      console.error('[Organizations] Fetch error:', fetchError)
+      return c.json({ error: 'Failed to fetch organizations', details: fetchError.message }, 500)
+    }
+    
+    // Transform data to include role
+    const organizations = (memberships || []).map(m => ({
+      id: m.organizations.id,
+      name: m.organizations.name,
+      tax_id: m.organizations.tax_id,
+      created_at: m.organizations.created_at,
+      role: m.role
+    }))
+    
+    console.log('[Organizations] Found', organizations.length, 'organizations')
+    return c.json({ organizations })
+    
+  } catch (error: any) {
+    console.error('[Organizations] Error:', error.message)
+    return c.json({ error: 'Internal server error', details: error.message }, 500)
+  }
+})
+
+// Create new organization
+app.post('/api/organizations/create', async (c) => {
+  try {
+    console.log('[Create Organization] Starting')
+    
+    const authHeader = c.req.header('Authorization')
+    if (!authHeader) {
+      return c.json({ error: 'Unauthorized' }, 401)
+    }
+    
+    const body = await c.req.json()
+    const { name, tax_id } = body
+    
+    if (!name || !name.trim()) {
+      return c.json({ error: 'Organization name is required' }, 400)
+    }
+    
+    const token = authHeader.replace('Bearer ', '')
+    const supabaseUrl = 'https://dmnxblcdaqnenggfyurw.supabase.co'
+    const supabaseServiceKey = 'sb_secret_ZpY2INapqj8cym1xdRjYGA_CJiBL0Eh'
+    const supabase = createClient(supabaseUrl, supabaseServiceKey)
+    
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token)
+    if (authError || !user) {
+      return c.json({ error: 'Unauthorized' }, 401)
+    }
+    
+    console.log('[Create Organization] Creating for user:', user.id)
+    console.log('[Create Organization] Name:', name)
+    
+    // Insert organization
+    const { data: organization, error: orgError } = await supabase
+      .from('organizations')
+      .insert({
+        name: name.trim(),
+        tax_id: tax_id?.trim() || null
+      })
+      .select()
+      .single()
+    
+    if (orgError) {
+      console.error('[Create Organization] Insert error:', orgError)
+      return c.json({ error: 'Failed to create organization', details: orgError.message }, 500)
+    }
+    
+    console.log('[Create Organization] Organization created:', organization.id)
+    
+    // Add user as owner
+    const { error: memberError } = await supabase
+      .from('organization_members')
+      .insert({
+        organization_id: organization.id,
+        user_id: user.id,
+        role: 'owner'
+      })
+    
+    if (memberError) {
+      console.error('[Create Organization] Member insert error:', memberError)
+      // Try to clean up the organization
+      await supabase.from('organizations').delete().eq('id', organization.id)
+      return c.json({ error: 'Failed to add user to organization', details: memberError.message }, 500)
+    }
+    
+    console.log('[Create Organization] User added as owner')
+    
+    return c.json({ 
+      success: true,
+      organization: {
+        ...organization,
+        role: 'owner'
+      }
+    })
+    
+  } catch (error: any) {
+    console.error('[Create Organization] Error:', error.message)
+    return c.json({ error: 'Internal server error', details: error.message }, 500)
+  }
+})
+
 // Upload and process invoice - MANUAL ENTRY MODE
 // Get all invoices for the current user
 app.get('/api/invoices', async (c) => {
@@ -980,6 +1120,347 @@ app.get('*', (c) => {
                   }, isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Sign up")
                 )
               )
+            );
+          }
+          
+          // ====== MULTI-TENANT ORGANIZATION SYSTEM ======
+          
+          // Organization Context
+          const OrganizationContext = React.createContext(null);
+          
+          function OrganizationProvider({ children, user }) {
+            const [organizations, setOrganizations] = useState([]);
+            const [currentOrg, setCurrentOrg] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [showCreateModal, setShowCreateModal] = useState(false);
+            
+            // Fetch user's organizations on mount
+            useEffect(() => {
+              if (!user) return;
+              
+              const fetchOrganizations = async () => {
+                try {
+                  console.log('[Organizations] Fetching for user:', user.id);
+                  
+                  const { data: session } = await supabaseClient.auth.getSession();
+                  const token = session?.session?.access_token;
+                  
+                  if (!token) {
+                    console.error('[Organizations] No auth token');
+                    setLoading(false);
+                    return;
+                  }
+                  
+                  // Fetch organizations via API
+                  const response = await fetch('/api/organizations', {
+                    headers: { 'Authorization': 'Bearer ' + token }
+                  });
+                  
+                  if (response.ok) {
+                    const data = await response.json();
+                    console.log('[Organizations] Fetched:', data.organizations?.length || 0);
+                    setOrganizations(data.organizations || []);
+                    
+                    // If no organizations, show create modal
+                    if (!data.organizations || data.organizations.length === 0) {
+                      console.log('[Organizations] No organizations found, showing create modal');
+                      setShowCreateModal(true);
+                    } else {
+                      // Set first org as current
+                      setCurrentOrg(data.organizations[0]);
+                    }
+                  } else {
+                    console.error('[Organizations] Failed to fetch:', response.status);
+                  }
+                } catch (error) {
+                  console.error('[Organizations] Error:', error);
+                } finally {
+                  setLoading(false);
+                }
+              };
+              
+              fetchOrganizations();
+            }, [user]);
+            
+            const value = {
+              organizations,
+              currentOrg,
+              setCurrentOrg,
+              loading,
+              showCreateModal,
+              setShowCreateModal,
+              refreshOrganizations: async () => {
+                // Re-fetch organizations
+                setLoading(true);
+                const { data: session } = await supabaseClient.auth.getSession();
+                const token = session?.session?.access_token;
+                if (token) {
+                  const response = await fetch('/api/organizations', {
+                    headers: { 'Authorization': 'Bearer ' + token }
+                  });
+                  if (response.ok) {
+                    const data = await response.json();
+                    setOrganizations(data.organizations || []);
+                    if (data.organizations && data.organizations.length > 0 && !currentOrg) {
+                      setCurrentOrg(data.organizations[0]);
+                    }
+                  }
+                }
+                setLoading(false);
+              }
+            };
+            
+            return h(OrganizationContext.Provider, { value }, children);
+          }
+          
+          // Create Organization Modal
+          function CreateOrganizationModal({ isOpen, onClose, onSuccess }) {
+            const [orgName, setOrgName] = useState('');
+            const [taxId, setTaxId] = useState('');
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState('');
+            
+            const handleSubmit = async (e) => {
+              e.preventDefault();
+              setError('');
+              
+              if (!orgName.trim()) {
+                setError('Organization name is required');
+                return;
+              }
+              
+              setLoading(true);
+              
+              try {
+                const { data: session } = await supabaseClient.auth.getSession();
+                const token = session?.session?.access_token;
+                
+                const response = await fetch('/api/organizations/create', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + token
+                  },
+                  body: JSON.stringify({
+                    name: orgName.trim(),
+                    tax_id: taxId.trim() || null
+                  })
+                });
+                
+                if (response.ok) {
+                  const data = await response.json();
+                  console.log('[Create Org] Success:', data);
+                  setOrgName('');
+                  setTaxId('');
+                  onSuccess(data.organization);
+                  onClose();
+                } else {
+                  const errorData = await response.json();
+                  setError(errorData.error || 'Failed to create organization');
+                }
+              } catch (err) {
+                console.error('[Create Org] Error:', err);
+                setError('Network error');
+              } finally {
+                setLoading(false);
+              }
+            };
+            
+            if (!isOpen) return null;
+            
+            return h('div', { 
+              className: 'fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4',
+              onClick: (e) => { if (e.target === e.currentTarget) onClose(); }
+            },
+              h('div', { className: 'bg-white rounded-2xl shadow-2xl max-w-md w-full p-8' },
+                h('div', { className: 'text-center mb-6' },
+                  h('div', { className: 'inline-flex items-center justify-center w-16 h-16 bg-indigo-100 rounded-full mb-4 text-3xl' }, '🏢'),
+                  h('h2', { className: 'text-2xl font-bold text-gray-900' }, 'Create Organization'),
+                  h('p', { className: 'text-gray-600 mt-2' }, 'Set up your new organization to get started')
+                ),
+                
+                h('form', { onSubmit: handleSubmit, className: 'space-y-4' },
+                  h('div', {},
+                    h('label', { className: 'block text-sm font-medium text-gray-700 mb-2' }, 'Organization Name *'),
+                    h('input', {
+                      type: 'text',
+                      value: orgName,
+                      onChange: (e) => setOrgName(e.target.value),
+                      className: 'w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent',
+                      placeholder: 'My Company Ltd.',
+                      required: true
+                    })
+                  ),
+                  
+                  h('div', {},
+                    h('label', { className: 'block text-sm font-medium text-gray-700 mb-2' }, 'Tax ID (Optional)'),
+                    h('input', {
+                      type: 'text',
+                      value: taxId,
+                      onChange: (e) => setTaxId(e.target.value),
+                      className: 'w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent',
+                      placeholder: '123456789'
+                    })
+                  ),
+                  
+                  error && h('div', { className: 'bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg' }, error),
+                  
+                  h('div', { className: 'flex gap-3 pt-4' },
+                    h('button', {
+                      type: 'button',
+                      onClick: onClose,
+                      className: 'flex-1 px-6 py-3 border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition',
+                      disabled: loading
+                    }, 'Cancel'),
+                    h('button', {
+                      type: 'submit',
+                      className: 'flex-1 px-6 py-3 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 transition disabled:opacity-50',
+                      disabled: loading
+                    }, loading ? 'Creating...' : 'Create Organization')
+                  )
+                )
+              )
+            );
+          }
+          
+          // App Layout with Sidebar
+          function AppLayout({ children, user, onSignOut }) {
+            const orgContext = React.useContext(OrganizationContext);
+            const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+            const [currentView, setCurrentView] = useState('dashboard');
+            
+            if (!orgContext) {
+              return h('div', { className: 'min-h-screen flex items-center justify-center' },
+                h('div', { className: 'text-gray-600' }, 'Loading organizations...')
+              );
+            }
+            
+            const { organizations, currentOrg, setCurrentOrg, loading, showCreateModal, setShowCreateModal, refreshOrganizations } = orgContext;
+            
+            if (loading) {
+              return h('div', { className: 'min-h-screen flex items-center justify-center bg-gray-50' },
+                h('div', { className: 'text-center' },
+                  h('div', { className: 'text-4xl mb-4' }, '⏳'),
+                  h('div', { className: 'text-gray-600 text-lg' }, 'Loading your workspace...')
+                )
+              );
+            }
+            
+            const handleCreateOrgSuccess = (newOrg) => {
+              setCurrentOrg(newOrg);
+              refreshOrganizations();
+            };
+            
+            return h('div', { className: 'min-h-screen bg-gray-50 flex' },
+              // Sidebar
+              h('div', { 
+                className: 'fixed inset-y-0 left-0 w-64 bg-white border-r border-gray-200 flex flex-col shadow-lg z-40',
+                style: { transition: 'transform 0.3s ease' }
+              },
+                // Top: Organization Switcher
+                h('div', { className: 'p-4 border-b border-gray-200' },
+                  h('div', { className: 'flex items-center gap-3 mb-2' },
+                    h('div', { className: 'w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center text-xl font-bold text-indigo-600' },
+                      currentOrg?.name?.charAt(0) || '🏢'
+                    ),
+                    h('div', { className: 'flex-1 min-w-0' },
+                      h('div', { className: 'font-semibold text-gray-900 truncate' }, currentOrg?.name || 'No Organization'),
+                      h('div', { className: 'text-xs text-gray-500' }, organizations.length + ' organization' + (organizations.length !== 1 ? 's' : ''))
+                    )
+                  ),
+                  
+                  // Organization Dropdown
+                  organizations.length > 1 && h('select', {
+                    value: currentOrg?.id || '',
+                    onChange: (e) => {
+                      const selected = organizations.find(org => org.id === e.target.value);
+                      if (selected) setCurrentOrg(selected);
+                    },
+                    className: 'w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent'
+                  },
+                    organizations.map(org => 
+                      h('option', { key: org.id, value: org.id }, org.name)
+                    )
+                  ),
+                  
+                  // Create New Organization Button
+                  h('button', {
+                    onClick: () => setShowCreateModal(true),
+                    className: 'w-full mt-2 px-3 py-2 text-sm bg-indigo-50 text-indigo-600 font-medium rounded-lg hover:bg-indigo-100 transition flex items-center justify-center gap-2'
+                  }, '+ Create Organization')
+                ),
+                
+                // Middle: Navigation Menu
+                h('nav', { className: 'flex-1 p-4 space-y-1 overflow-y-auto' },
+                  h('a', {
+                    href: '#',
+                    onClick: (e) => { e.preventDefault(); setCurrentView('dashboard'); },
+                    className: 'flex items-center gap-3 px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition ' + (currentView === 'dashboard' ? 'bg-indigo-50 text-indigo-600 font-medium' : '')
+                  },
+                    h('span', { className: 'text-xl' }, '📊'),
+                    h('span', {}, 'Dashboard')
+                  ),
+                  
+                  h('a', {
+                    href: '#',
+                    onClick: (e) => { e.preventDefault(); setCurrentView('invoices'); },
+                    className: 'flex items-center gap-3 px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition ' + (currentView === 'invoices' ? 'bg-indigo-50 text-indigo-600 font-medium' : '')
+                  },
+                    h('span', { className: 'text-xl' }, '📄'),
+                    h('span', {}, 'Smart Procurement')
+                  ),
+                  
+                  h('a', {
+                    href: '#',
+                    onClick: (e) => { e.preventDefault(); setCurrentView('employees'); },
+                    className: 'flex items-center gap-3 px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition ' + (currentView === 'employees' ? 'bg-indigo-50 text-indigo-600 font-medium' : '')
+                  },
+                    h('span', { className: 'text-xl' }, '👥'),
+                    h('span', {}, 'Employees'),
+                    h('span', { className: 'ml-auto text-xs bg-gray-200 text-gray-600 px-2 py-1 rounded-full' }, 'Soon')
+                  ),
+                  
+                  h('a', {
+                    href: '#',
+                    onClick: (e) => { e.preventDefault(); setCurrentView('settings'); },
+                    className: 'flex items-center gap-3 px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition ' + (currentView === 'settings' ? 'bg-indigo-50 text-indigo-600 font-medium' : '')
+                  },
+                    h('span', { className: 'text-xl' }, '⚙️'),
+                    h('span', {}, 'Settings')
+                  )
+                ),
+                
+                // Bottom: User Profile
+                h('div', { className: 'p-4 border-t border-gray-200' },
+                  h('div', { className: 'flex items-center gap-3 mb-3' },
+                    h('div', { className: 'w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-full flex items-center justify-center text-white font-bold' },
+                      user?.email?.charAt(0).toUpperCase() || '👤'
+                    ),
+                    h('div', { className: 'flex-1 min-w-0' },
+                      h('div', { className: 'font-medium text-gray-900 truncate text-sm' }, user?.email || 'User'),
+                      h('div', { className: 'text-xs text-gray-500' }, currentOrg?.role || 'Member')
+                    )
+                  ),
+                  h('button', {
+                    onClick: onSignOut,
+                    className: 'w-full px-4 py-2 text-sm bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 transition flex items-center justify-center gap-2'
+                  }, '🚪 Logout')
+                )
+              ),
+              
+              // Main Content Area
+              h('div', { className: 'flex-1 ml-64' },
+                h('div', { className: 'p-8' },
+                  React.cloneElement(children, { currentView, setCurrentView, currentOrg })
+                )
+              ),
+              
+              // Create Organization Modal
+              h(CreateOrganizationModal, {
+                isOpen: showCreateModal,
+                onClose: () => setShowCreateModal(false),
+                onSuccess: handleCreateOrgSuccess
+              })
             );
           }
           
@@ -1720,7 +2201,12 @@ app.get('*', (c) => {
               return h(Auth, { onAuth: handleAuth });
             }
             
-            return h(Dashboard, { user, onSignOut: handleSignOut });
+            // Wrap Dashboard with Organization Context and AppLayout
+            return h(OrganizationProvider, { user },
+              h(AppLayout, { user, onSignOut: handleSignOut },
+                h(Dashboard, { user, onSignOut: handleSignOut })
+              )
+            );
           }
           
           // Render app
