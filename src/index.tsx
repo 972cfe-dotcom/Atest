@@ -1521,8 +1521,9 @@ app.get('*', (c) => {
           }
           
           // Dashboard Component
-          function Dashboard({ user, onSignOut }) {
-            const [activeTab, setActiveTab] = useState('documents');
+          function Dashboard({ user, onSignOut, currentView, setCurrentView }) {
+            // Use currentView from AppLayout instead of local activeTab
+            const activeTab = currentView || 'dashboard';
             const [documents, setDocuments] = useState([]);
             const [invoices, setInvoices] = useState([]);
             const [loading, setLoading] = useState(true);
@@ -1539,7 +1540,7 @@ app.get('*', (c) => {
             const [isAnalyzing, setIsAnalyzing] = useState(false);
             
             useEffect(() => {
-              if (activeTab === 'documents') {
+              if (activeTab === 'documents' || activeTab === 'dashboard') {
                 loadDocuments();
               } else if (activeTab === 'invoices') {
                 loadInvoices();
@@ -1871,49 +1872,15 @@ app.get('*', (c) => {
               return '📄';
             };
             
+            // Dashboard content without old sidebar (AppLayout provides the sidebar)
             return h('div', { className: 'min-h-screen bg-gray-50' },
-              h('aside', { className: 'fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-gray-200' },
-                h('div', { className: 'h-full flex flex-col' },
-                  h('div', { className: 'p-6 border-b border-gray-200' },
-                    h('h2', { className: 'text-xl font-bold text-gray-900' }, 'DocProcessor')
-                  ),
-                  h('nav', { className: 'flex-1 p-4 space-y-2' },
-                    h('button', { 
-                      onClick: () => setActiveTab('documents'),
-                      className: activeTab === 'documents' 
-                        ? 'w-full flex items-center gap-3 px-4 py-3 text-indigo-600 bg-indigo-50 rounded-lg font-medium' 
-                        : 'w-full flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-gray-50 rounded-lg font-medium'
-                    }, '📄 Documents'),
-                    h('button', { 
-                      onClick: () => setActiveTab('invoices'),
-                      className: activeTab === 'invoices' 
-                        ? 'w-full flex items-center gap-3 px-4 py-3 text-indigo-600 bg-indigo-50 rounded-lg font-medium' 
-                        : 'w-full flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-gray-50 rounded-lg font-medium'
-                    }, '🧾 Invoices')
-                  ),
-                  h('div', { className: 'p-4 border-t border-gray-200' },
-                    h('div', { className: 'flex items-center gap-3 px-4 py-3 text-sm text-gray-600 mb-2' },
-                      h('div', { className: 'w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center' },
-                        h('span', { className: 'text-indigo-600 font-medium' }, user?.email?.[0]?.toUpperCase())
-                      ),
-                      h('div', { className: 'flex-1 min-w-0' },
-                        h('p', { className: 'font-medium text-gray-900 truncate' }, user?.email)
-                      )
-                    ),
-                    h('button', {
-                      onClick: onSignOut,
-                      className: 'w-full flex items-center gap-2 px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition'
-                    }, '🚪 Sign Out')
-                  )
-                )
-              ),
-              h('div', { className: 'pl-64' },
+              h('div', {},  // No padding needed, AppLayout handles layout
                 h('header', { className: 'bg-white border-b border-gray-200 sticky top-0 z-40' },
                   h('div', { className: 'px-8 py-4 flex items-center justify-between' },
                     h('h1', { className: 'text-2xl font-bold text-gray-900' }, 
-                      activeTab === 'documents' ? 'My Documents' : 'My Invoices'
+                      (activeTab === 'documents' || activeTab === 'dashboard') ? 'My Documents' : 'My Invoices'
                     ),
-                    activeTab === 'documents' ? h('button', {
+                    (activeTab === 'documents' || activeTab === 'dashboard') ? h('button', {
                       onClick: () => setShowUpload(true),
                       className: 'flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition'
                     }, '➕ Upload Document') : h('button', {
@@ -1924,7 +1891,7 @@ app.get('*', (c) => {
                 ),
                 h('main', { className: 'p-8' },
                   loading ? h('div', { className: 'flex items-center justify-center py-12' }, '⏳ Loading...') :
-                  activeTab === 'documents' ? (
+                  (activeTab === 'documents' || activeTab === 'dashboard') ? (
                     documents.length === 0 ? h('div', { className: 'text-center py-12' },
                       h('div', { className: 'text-6xl mb-4' }, '📤'),
                       h('h3', { className: 'text-xl font-semibold text-gray-900 mb-2' }, 'No documents yet'),
