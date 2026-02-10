@@ -522,12 +522,21 @@ app.get('/api/organizations', async (c) => {
     }
     
     const token = authHeader.replace('Bearer ', '')
-    const supabaseUrl = 'https://dmnxblcdaqnenggfyurw.supabase.co'
-    const supabaseServiceKey = c.env?.SUPABASE_SERVICE_KEY || 'missing'
-    const supabase = createClient(supabaseUrl, supabaseServiceKey)
+    const supabaseUrl = c.env?.SUPABASE_URL || 'https://dmnxblcdaqnenggfyurw.supabase.co'
+    const supabaseAnonKey = c.env?.SUPABASE_ANON_KEY || 'missing'
+    
+    // Create Supabase client with user's token for RLS
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: {
+        headers: {
+          Authorization: authHeader
+        }
+      }
+    })
     
     const { data: { user }, error: authError } = await supabase.auth.getUser(token)
     if (authError || !user) {
+      console.error('[Organizations] Auth error:', authError)
       return c.json({ error: 'Unauthorized' }, 401)
     }
     
@@ -588,12 +597,21 @@ app.post('/api/organizations/create', async (c) => {
     }
     
     const token = authHeader.replace('Bearer ', '')
-    const supabaseUrl = 'https://dmnxblcdaqnenggfyurw.supabase.co'
-    const supabaseServiceKey = c.env?.SUPABASE_SERVICE_KEY || 'missing'
-    const supabase = createClient(supabaseUrl, supabaseServiceKey)
+    const supabaseUrl = c.env?.SUPABASE_URL || 'https://dmnxblcdaqnenggfyurw.supabase.co'
+    const supabaseAnonKey = c.env?.SUPABASE_ANON_KEY || 'missing'
+    
+    // Create Supabase client with user's token for RLS
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: {
+        headers: {
+          Authorization: authHeader
+        }
+      }
+    })
     
     const { data: { user }, error: authError } = await supabase.auth.getUser(token)
     if (authError || !user) {
+      console.error('[Create Organization] Auth error:', authError)
       return c.json({ error: 'Unauthorized' }, 401)
     }
     
