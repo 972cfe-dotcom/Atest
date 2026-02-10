@@ -8,6 +8,7 @@ import type { Document, Invoice } from './types/database'
 type Bindings = {
   SUPABASE_URL: string
   SUPABASE_ANON_KEY: string
+  SUPABASE_SERVICE_KEY: string
   OPENAI_API_KEY: string
   GOOGLE_API_KEY: string
   CLICKSEND_USERNAME: string
@@ -522,7 +523,7 @@ app.get('/api/organizations', async (c) => {
     
     const token = authHeader.replace('Bearer ', '')
     const supabaseUrl = 'https://dmnxblcdaqnenggfyurw.supabase.co'
-    const supabaseServiceKey = 'sb_secret_ZpY2INapqj8cym1xdRjYGA_CJiBL0Eh'
+    const supabaseServiceKey = c.env?.SUPABASE_SERVICE_KEY || 'missing'
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
     
     const { data: { user }, error: authError } = await supabase.auth.getUser(token)
@@ -588,7 +589,7 @@ app.post('/api/organizations/create', async (c) => {
     
     const token = authHeader.replace('Bearer ', '')
     const supabaseUrl = 'https://dmnxblcdaqnenggfyurw.supabase.co'
-    const supabaseServiceKey = 'sb_secret_ZpY2INapqj8cym1xdRjYGA_CJiBL0Eh'
+    const supabaseServiceKey = c.env?.SUPABASE_SERVICE_KEY || 'missing'
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
     
     const { data: { user }, error: authError } = await supabase.auth.getUser(token)
@@ -665,7 +666,7 @@ app.get('/api/invoices', async (c) => {
     
     // Create Supabase client with service role key
     const supabaseUrl = 'https://dmnxblcdaqnenggfyurw.supabase.co'
-    const supabaseServiceKey = 'sb_secret_ZpY2INapqj8cym1xdRjYGA_CJiBL0Eh'
+    const supabaseServiceKey = c.env?.SUPABASE_SERVICE_KEY || 'missing'
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
     
     // Verify user with auth token
@@ -741,7 +742,7 @@ app.post('/api/invoices/upload', async (c) => {
     
     console.log('[Invoice Upload] Step 4: Creating Supabase client with SERVICE ROLE KEY')
     const supabaseUrl = 'https://dmnxblcdaqnenggfyurw.supabase.co'
-    const supabaseServiceKey = 'sb_secret_ZpY2INapqj8cym1xdRjYGA_CJiBL0Eh'
+    const supabaseServiceKey = c.env?.SUPABASE_SERVICE_KEY || 'missing'
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
     console.log('[Invoice Upload] Service role client created')
 
@@ -970,9 +971,13 @@ app.delete('/api/invoices/:id', async (c) => {
 
 // Main HTML page with inline React app
 app.get('*', (c) => {
-  // Hardcoded Supabase credentials for Cloudflare deployment
-  const supabaseUrl = 'https://dmnxblcdaqnenggfyurw.supabase.co'
-  const supabaseAnonKey = 'sb_publishable_B5zKNJ_dI1254sPk4Yt0hQ_p-3qdaRe'
+  // Get Supabase credentials from environment (required)
+  const supabaseUrl = c.env?.SUPABASE_URL
+  const supabaseAnonKey = c.env?.SUPABASE_ANON_KEY
+  
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return c.text('Configuration error: Missing Supabase credentials', 500)
+  }
 
   return c.html(`
     <!DOCTYPE html>
