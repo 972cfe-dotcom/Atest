@@ -1315,26 +1315,54 @@ app.get('*', (c) => {
               setLoading(true);
               
               try {
-                // Get current session with refresh
-                const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
+                console.log('[Create Org] ========== START ==========');
                 
-                if (sessionError) {
-                  console.error('[Create Org] Session error:', sessionError);
-                  setError('Failed to get session: ' + sessionError.message);
-                  setLoading(false);
-                  return;
-                }
+                // Helper function to get fresh session with retry logic
+                const getFreshSession = async (retryCount = 0) => {
+                  console.log('[Create Org] Fetching fresh session... (attempt ' + (retryCount + 1) + ')');
+                  
+                  const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
+                  
+                  if (sessionError) {
+                    console.error('[Create Org] Session error:', sessionError);
+                    throw new Error('Failed to get session: ' + sessionError.message);
+                  }
+                  
+                  if (!session || !session.access_token) {
+                    console.warn('[Create Org] No session/token found on attempt ' + (retryCount + 1));
+                    
+                    // If first attempt failed, retry once after 1 second
+                    if (retryCount === 0) {
+                      console.log('[Create Org] Retrying authentication in 1 second...');
+                      setError('Retrying authentication...');
+                      
+                      await new Promise(resolve => setTimeout(resolve, 1000));
+                      return getFreshSession(1); // Recursive retry
+                    }
+                    
+                    // Second attempt also failed
+                    throw new Error('No active session. Please sign in again.');
+                  }
+                  
+                  console.log('[Create Org] ✓ Session obtained');
+                  console.log('[Create Org] Token length:', session.access_token.length);
+                  console.log('[Create Org] Token type:', typeof session.access_token);
+                  console.log('[Create Org] User ID:', session.user?.id);
+                  console.log('[Create Org] User email:', session.user?.email);
+                  
+                  return session;
+                };
                 
-                if (!session?.access_token) {
-                  console.error('[Create Org] No valid session/token');
-                  setError('No active session. Please sign in again.');
-                  setLoading(false);
-                  return;
-                }
-                
+                // Force fetch the latest session with retry logic
+                const session = await getFreshSession();
                 const token = session.access_token;
-                console.log('[Create Org] Token obtained, length:', token.length);
-                console.log('[Create Org] Making request with Authorization header...');
+                
+                // Clear retry message
+                setError('');
+                
+                console.log('[Create Org] Making API request with fresh token...');
+                console.log('[Create Org] Organization name:', orgName.trim());
+                console.log('[Create Org] Tax ID:', taxId.trim() || 'none');
                 
                 const response = await fetch('/api/organizations/create', {
                   method: 'POST',
@@ -1348,25 +1376,32 @@ app.get('*', (c) => {
                   })
                 });
                 
-                console.log('[Create Org] Response status:', response.status);
+                console.log('[Create Org] Response received, status:', response.status);
                 
                 if (response.ok) {
                   const data = await response.json();
-                  console.log('[Create Org] Success:', data);
+                  console.log('[Create Org] ✓ SUCCESS - Organization created:', data.organization?.id);
+                  console.log('[Create Org] ========== END ==========');
+                  
                   setOrgName('');
                   setTaxId('');
                   onSuccess(data.organization);
                   onClose();
                 } else {
                   const errorData = await response.json();
-                  console.error('[Create Org] Error response:', errorData);
-                  console.error('[Create Org] Status:', response.status);
+                  console.error('[Create Org] ❌ ERROR - Status:', response.status);
+                  console.error('[Create Org] Error details:', errorData);
+                  console.log('[Create Org] ========== END ==========');
+                  
                   const errorMsg = (errorData.error || 'Failed to create organization') + ' (Status: ' + response.status + ')';
                   setError(errorMsg);
                 }
               } catch (err) {
-                console.error('[Create Org] Exception:', err);
-                setError('Network error: ' + (err?.message || 'Unknown error'));
+                console.error('[Create Org] ❌ EXCEPTION:', err);
+                console.error('[Create Org] Exception details:', err?.message);
+                console.log('[Create Org] ========== END ==========');
+                
+                setError(err?.message || 'Network error: Please try again');
               } finally {
                 setLoading(false);
               }
