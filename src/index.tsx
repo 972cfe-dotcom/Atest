@@ -582,11 +582,14 @@ app.get('/api/organizations', async (c) => {
 // Create new organization
 app.post('/api/organizations/create', async (c) => {
   try {
-    console.log('[Create Organization] Starting')
+    console.log('[Create Organization] ========== START ==========')
     
     const authHeader = c.req.header('Authorization')
+    console.log('[Create Organization] Authorization header present:', !!authHeader)
+    
     if (!authHeader) {
-      return c.json({ error: 'Unauthorized' }, 401)
+      console.error('[Create Organization] ❌ Missing Authorization header')
+      return c.json({ error: 'Unauthorized - Missing Authorization header' }, 401)
     }
     
     const body = await c.req.json()
@@ -597,8 +600,13 @@ app.post('/api/organizations/create', async (c) => {
     }
     
     const token = authHeader.replace('Bearer ', '')
+    console.log('[Create Organization] Token extracted, length:', token.length)
+    
     const supabaseUrl = c.env?.SUPABASE_URL || 'https://dmnxblcdaqnenggfyurw.supabase.co'
     const supabaseAnonKey = c.env?.SUPABASE_ANON_KEY || 'missing'
+    
+    console.log('[Create Organization] Supabase URL:', supabaseUrl)
+    console.log('[Create Organization] Anon key present:', supabaseAnonKey !== 'missing')
     
     // Create Supabase client with user's token for RLS
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
@@ -609,16 +617,30 @@ app.post('/api/organizations/create', async (c) => {
       }
     })
     
+    console.log('[Create Organization] Verifying user token...')
     const { data: { user }, error: authError } = await supabase.auth.getUser(token)
-    if (authError || !user) {
-      console.error('[Create Organization] Auth error:', authError)
-      return c.json({ error: 'Unauthorized' }, 401)
+    
+    if (authError) {
+      console.error('[Create Organization] ❌ Auth error:', authError.message)
+      console.error('[Create Organization] Auth error details:', JSON.stringify(authError))
+      return c.json({ 
+        error: 'Unauthorized - Invalid token', 
+        details: authError.message 
+      }, 401)
     }
     
-    console.log('[Create Organization] Creating for user:', user.id)
-    console.log('[Create Organization] Name:', name)
+    if (!user) {
+      console.error('[Create Organization] ❌ No user returned from auth')
+      return c.json({ error: 'Unauthorized - No user found' }, 401)
+    }
+    
+    console.log('[Create Organization] ✓ User verified:', user.id)
+    console.log('[Create Organization] User email:', user.email)
+    console.log('[Create Organization] Creating organization:', name)
+    console.log('[Create Organization] Tax ID:', tax_id || 'none')
     
     // Insert organization
+    console.log('[Create Organization] Step 1: Inserting organization into database...')
     const { data: organization, error: orgError } = await supabase
       .from('organizations')
       .insert({
@@ -629,13 +651,22 @@ app.post('/api/organizations/create', async (c) => {
       .single()
     
     if (orgError) {
-      console.error('[Create Organization] Insert error:', orgError)
-      return c.json({ error: 'Failed to create organization', details: orgError.message }, 500)
+      console.error('[Create Organization] ❌ Organization insert error:', orgError.message)
+      console.error('[Create Organization] Error code:', orgError.code)
+      console.error('[Create Organization] Error details:', JSON.stringify(orgError))
+      return c.json({ 
+        error: 'Failed to create organization', 
+        details: orgError.message,
+        code: orgError.code 
+      }, 500)
     }
     
-    console.log('[Create Organization] Organization created:', organization.id)
+    console.log('[Create Organization] ✓ Organization created successfully')
+    console.log('[Create Organization] Organization ID:', organization.id)
+    console.log('[Create Organization] Organization name:', organization.name)
     
     // Add user as owner
+    console.log('[Create Organization] Step 2: Adding user as owner...')
     const { error: memberError } = await supabase
       .from('organization_members')
       .insert({
@@ -645,13 +676,23 @@ app.post('/api/organizations/create', async (c) => {
       })
     
     if (memberError) {
-      console.error('[Create Organization] Member insert error:', memberError)
+      console.error('[Create Organization] ❌ Member insert error:', memberError.message)
+      console.error('[Create Organization] Error code:', memberError.code)
+      console.error('[Create Organization] Error details:', JSON.stringify(memberError))
+      
       // Try to clean up the organization
+      console.log('[Create Organization] Attempting cleanup of organization:', organization.id)
       await supabase.from('organizations').delete().eq('id', organization.id)
-      return c.json({ error: 'Failed to add user to organization', details: memberError.message }, 500)
+      
+      return c.json({ 
+        error: 'Failed to add user to organization', 
+        details: memberError.message,
+        code: memberError.code 
+      }, 500)
     }
     
-    console.log('[Create Organization] User added as owner')
+    console.log('[Create Organization] ✓ User added as owner successfully')
+    console.log('[Create Organization] ========== SUCCESS ==========')
     
     return c.json({ 
       success: true,
@@ -1274,8 +1315,26 @@ app.get('*', (c) => {
               setLoading(true);
               
               try {
-                const { data: session } = await supabaseClient.auth.getSession();
-                const token = session?.session?.access_token;
+                // Get current session with refresh
+                const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
+                
+                if (sessionError) {
+                  console.error('[Create Org] Session error:', sessionError);
+                  setError('Failed to get session: ' + sessionError.message);
+                  setLoading(false);
+                  return;
+                }
+                
+                if (!session?.access_token) {
+                  console.error('[Create Org] No valid session/token');
+                  setError('No active session. Please sign in again.');
+                  setLoading(false);
+                  return;
+                }
+                
+                const token = session.access_token;
+                console.log('[Create Org] Token obtained, length:', token.length);
+                console.log('[Create Org] Making request with Authorization header...');
                 
                 const response = await fetch('/api/organizations/create', {
                   method: 'POST',
@@ -1289,6 +1348,8 @@ app.get('*', (c) => {
                   })
                 });
                 
+                console.log('[Create Org] Response status:', response.status);
+                
                 if (response.ok) {
                   const data = await response.json();
                   console.log('[Create Org] Success:', data);
@@ -1298,11 +1359,14 @@ app.get('*', (c) => {
                   onClose();
                 } else {
                   const errorData = await response.json();
-                  setError(errorData.error || 'Failed to create organization');
+                  console.error('[Create Org] Error response:', errorData);
+                  console.error('[Create Org] Status:', response.status);
+                  const errorMsg = (errorData.error || 'Failed to create organization') + ' (Status: ' + response.status + ')';
+                  setError(errorMsg);
                 }
               } catch (err) {
-                console.error('[Create Org] Error:', err);
-                setError('Network error');
+                console.error('[Create Org] Exception:', err);
+                setError('Network error: ' + (err?.message || 'Unknown error'));
               } finally {
                 setLoading(false);
               }
