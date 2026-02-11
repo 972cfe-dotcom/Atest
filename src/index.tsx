@@ -1144,19 +1144,55 @@ app.get('*', (c) => {
             const [password, setPassword] = useState('');
             const [loading, setLoading] = useState(false);
             const [error, setError] = useState('');
+            const [awaitingVerification, setAwaitingVerification] = useState(false);
+            const [verificationEmail, setVerificationEmail] = useState('');
             
             const handleSubmit = async (e) => {
               e.preventDefault();
               setError('');
               setLoading(true);
               try {
-                await onAuth(email, password, isSignUp);
+                const result = await onAuth(email, password, isSignUp);
+                
+                // Check if email verification is required
+                if (result && result.requiresVerification) {
+                  console.log('[Auth] Email verification required');
+                  setAwaitingVerification(true);
+                  setVerificationEmail(email);
+                }
               } catch (err) {
                 setError(err.message || 'Authentication failed');
               } finally {
                 setLoading(false);
               }
             };
+            
+            // If awaiting email verification, show success message
+            if (awaitingVerification) {
+              return h('div', { className: 'min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4' },
+                h('div', { className: 'max-w-md w-full bg-white rounded-2xl shadow-xl p-8' },
+                  h('div', { className: 'text-center' },
+                    h('div', { className: 'inline-flex items-center justify-center w-20 h-20 bg-green-100 rounded-full mb-6 text-5xl' }, '✉️'),
+                    h('h1', { className: 'text-3xl font-bold text-gray-900 mb-4' }, 'Verify your email'),
+                    h('p', { className: 'text-gray-600 mb-2' }, 'We sent a confirmation link to:'),
+                    h('p', { className: 'text-indigo-600 font-medium mb-6' }, verificationEmail),
+                    h('div', { className: 'bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6' },
+                      h('p', { className: 'text-sm text-blue-800' }, '📧 Please check your inbox and click the link to activate your account.')
+                    ),
+                    h('button', {
+                      onClick: () => {
+                        setAwaitingVerification(false);
+                        setIsSignUp(false);
+                        setEmail('');
+                        setPassword('');
+                        setError('');
+                      },
+                      className: 'w-full bg-indigo-600 text-white py-3 rounded-lg font-medium hover:bg-indigo-700 transition'
+                    }, 'Back to Login')
+                  )
+                )
+              );
+            }
             
             return h('div', { className: 'min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4' },
               h('div', { className: 'max-w-md w-full bg-white rounded-2xl shadow-xl p-8' },
@@ -2282,19 +2318,35 @@ app.get('*', (c) => {
             const [loading, setLoading] = useState(true);
             
             useEffect(() => {
+              console.log('[App] Initializing - checking for existing session');
+              
               supabaseClient.auth.getSession().then(({ data: { session } }) => {
                 if (session?.user) {
+                  console.log('[App] ✓ Existing session found for:', session.user.email);
                   setUser(session.user);
                   setView('dashboard');
+                } else {
+                  console.log('[App] No existing session');
                 }
                 setLoading(false);
               });
               
-              const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((_event, session) => {
+              const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((event, session) => {
+                console.log('[App] Auth state changed:', event);
+                
                 if (session?.user) {
+                  console.log('[App] ✓ User authenticated:', session.user.email);
+                  console.log('[App] Event type:', event);
+                  
                   setUser(session.user);
                   setView('dashboard');
+                  
+                  // Special handling for email verification confirmation
+                  if (event === 'SIGNED_IN' && window.location.hash.includes('type=signup')) {
+                    console.log('[App] 🎉 Email verification completed - redirecting to dashboard');
+                  }
                 } else {
+                  console.log('[App] User signed out or session ended');
                   setUser(null);
                   setView('landing');
                 }
@@ -2305,19 +2357,55 @@ app.get('*', (c) => {
             
             const handleAuth = async (email, password, isSignUp) => {
               if (isSignUp) {
+                console.log('[Auth] Starting sign-up for:', email);
+                
                 const { data, error } = await supabaseClient.auth.signUp({ email, password });
-                if (error) throw error;
-                if (data.user) {
+                
+                if (error) {
+                  console.error('[Auth] Sign-up error:', error);
+                  throw error;
+                }
+                
+                console.log('[Auth] Sign-up response received');
+                console.log('[Auth] User:', data.user?.id);
+                console.log('[Auth] Session:', data.session ? 'present' : 'null');
+                
+                // Check if email verification is required (session will be null)
+                if (data.user && !data.session) {
+                  console.log('[Auth] ✉️ Email verification required - session is null');
+                  return { requiresVerification: true };
+                }
+                
+                // If session exists, user is authenticated immediately
+                if (data.user && data.session) {
+                  console.log('[Auth] ✓ User authenticated immediately (no email verification)');
                   setUser(data.user);
                   setView('dashboard');
+                  return { requiresVerification: false };
                 }
+                
+                console.warn('[Auth] Unexpected state: no user and no session');
+                throw new Error('Sign-up failed: Please try again');
+                
               } else {
+                console.log('[Auth] Starting sign-in for:', email);
+                
                 const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-                if (error) throw error;
-                if (data.user) {
+                
+                if (error) {
+                  console.error('[Auth] Sign-in error:', error);
+                  throw error;
+                }
+                
+                if (data.user && data.session) {
+                  console.log('[Auth] ✓ Sign-in successful');
                   setUser(data.user);
                   setView('dashboard');
+                  return { requiresVerification: false };
                 }
+                
+                console.warn('[Auth] Unexpected state: no user or no session');
+                throw new Error('Sign-in failed: Please try again');
               }
             };
             
