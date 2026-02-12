@@ -79,23 +79,60 @@ app.post('/api/process-ocr', async (c) => {
 // Get documents for user
 app.get('/api/documents', async (c) => {
   try {
+    console.log('[Documents GET] ========== START ==========')
+    console.log('[Documents GET] Timestamp:', new Date().toISOString())
+    
+    // CRITICAL: Environment check
+    console.log('[Documents GET] Environment Check:')
+    console.log('[Documents GET]   SUPABASE_URL:', !!c.env?.SUPABASE_URL)
+    console.log('[Documents GET]   SUPABASE_ANON_KEY:', !!c.env?.SUPABASE_ANON_KEY)
+    console.log('[Documents GET]   Available env keys:', Object.keys(c.env || {}).join(', '))
+    
     const authHeader = c.req.header('Authorization')
+    console.log('[Documents GET] Authorization header present:', !!authHeader)
+    
     if (!authHeader) {
-      return c.json({ error: 'Unauthorized' }, 401)
+      console.error('[Documents GET] ❌ Missing Authorization header')
+      return c.json({ 
+        success: false,
+        error: 'Unauthorized' 
+      }, 401)
     }
 
     const supabase = createServerSupabaseClient()
+    console.log('[Documents GET] Supabase client created')
     
     // Get user from auth header
-    const { data: { user }, error: authError } = await supabase.auth.getUser(
-      authHeader.replace('Bearer ', '')
-    )
+    const token = authHeader.replace('Bearer ', '')
+    console.log('[Documents GET] Token length:', token.length)
+    
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token)
 
-    if (authError || !user) {
-      return c.json({ error: 'Unauthorized' }, 401)
+    if (authError) {
+      console.error('[Documents GET] ❌ Auth error:', authError.message)
+      console.error('[Documents GET] Auth error details:', JSON.stringify(authError))
+      return c.json({ 
+        success: false,
+        error: 'Unauthorized',
+        error_name: authError.name,
+        error_message: authError.message,
+        error_code: authError.code
+      }, 401)
     }
+    
+    if (!user) {
+      console.error('[Documents GET] ❌ No user returned')
+      return c.json({ 
+        success: false,
+        error: 'Unauthorized' 
+      }, 401)
+    }
+    
+    console.log('[Documents GET] ✓ User verified:', user.id)
+    console.log('[Documents GET] User email:', user.email)
 
     // Fetch user's documents
+    console.log('[Documents GET] Fetching documents...')
     const { data: documents, error: fetchError } = await supabase
       .from('documents')
       .select('*')
@@ -103,42 +140,118 @@ app.get('/api/documents', async (c) => {
       .order('created_at', { ascending: false })
 
     if (fetchError) {
-      return c.json({ error: 'Failed to fetch documents' }, 500)
+      console.error('[Documents GET] ❌ Fetch error:', fetchError.message)
+      console.error('[Documents GET] Error code:', fetchError.code)
+      console.error('[Documents GET] Error hint:', fetchError.hint)
+      console.error('[Documents GET] Error details:', fetchError.details)
+      console.error('[Documents GET] Full error:', JSON.stringify(fetchError))
+      
+      return c.json({ 
+        success: false,
+        error: 'Failed to fetch documents',
+        error_name: fetchError.name,
+        error_message: fetchError.message,
+        error_code: fetchError.code,
+        error_hint: fetchError.hint,
+        error_details: fetchError.details,
+        env_check: {
+          hasUrl: !!c.env?.SUPABASE_URL,
+          hasKey: !!c.env?.SUPABASE_ANON_KEY
+        }
+      }, 500)
     }
 
+    console.log('[Documents GET] ✓ Found', documents?.length || 0, 'documents')
+    console.log('[Documents GET] ========== SUCCESS ==========')
+    
     return c.json({ documents })
-  } catch (error) {
-    console.error('Fetch documents error:', error)
-    return c.json({ error: 'Internal server error' }, 500)
+    
+  } catch (error: any) {
+    console.error('[Documents GET] ========== CRITICAL ERROR ==========')
+    console.error('[Documents GET] Error type:', error.constructor?.name)
+    console.error('[Documents GET] Error message:', error.message)
+    console.error('[Documents GET] Error stack:', error.stack)
+    console.error('[Documents GET] Error toString:', error.toString())
+    console.error('[Documents GET] ========== END ERROR ==========')
+    
+    return c.json({ 
+      success: false,
+      error: 'Internal server error',
+      error_name: error.name || error.constructor?.name,
+      error_message: error.message,
+      error_stack: error.stack,
+      error_details: error.toString(),
+      env_check: {
+        hasUrl: !!c.env?.SUPABASE_URL,
+        hasKey: !!c.env?.SUPABASE_ANON_KEY
+      }
+    }, 500)
   }
 })
 
 // Create document
 app.post('/api/documents', async (c) => {
   try {
+    console.log('[Documents POST] ========== START ==========')
+    console.log('[Documents POST] Timestamp:', new Date().toISOString())
+    
+    // CRITICAL: Environment check
+    console.log('[Documents POST] Environment Check:')
+    console.log('[Documents POST]   SUPABASE_URL:', !!c.env?.SUPABASE_URL)
+    console.log('[Documents POST]   SUPABASE_ANON_KEY:', !!c.env?.SUPABASE_ANON_KEY)
+    
     const authHeader = c.req.header('Authorization')
+    console.log('[Documents POST] Authorization header present:', !!authHeader)
+    
     if (!authHeader) {
-      return c.json({ error: 'Unauthorized' }, 401)
+      console.error('[Documents POST] ❌ Missing Authorization header')
+      return c.json({ 
+        success: false,
+        error: 'Unauthorized' 
+      }, 401)
     }
 
     const { title } = await c.req.json()
+    console.log('[Documents POST] Title provided:', !!title)
 
     if (!title) {
-      return c.json({ error: 'Title is required' }, 400)
+      return c.json({ 
+        success: false,
+        error: 'Title is required' 
+      }, 400)
     }
 
     const supabase = createServerSupabaseClient(c.env)
+    console.log('[Documents POST] Supabase client created')
 
     // Get user from auth header
-    const { data: { user }, error: authError } = await supabase.auth.getUser(
-      authHeader.replace('Bearer ', '')
-    )
+    const token = authHeader.replace('Bearer ', '')
+    console.log('[Documents POST] Token length:', token.length)
+    
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token)
 
-    if (authError || !user) {
-      return c.json({ error: 'Unauthorized' }, 401)
+    if (authError) {
+      console.error('[Documents POST] ❌ Auth error:', authError.message)
+      return c.json({ 
+        success: false,
+        error: 'Unauthorized',
+        error_name: authError.name,
+        error_message: authError.message
+      }, 401)
     }
+    
+    if (!user) {
+      console.error('[Documents POST] ❌ No user returned')
+      return c.json({ 
+        success: false,
+        error: 'Unauthorized' 
+      }, 401)
+    }
+    
+    console.log('[Documents POST] ✓ User verified:', user.id)
 
     // Create document
+    console.log('[Documents POST] Creating document...')
     const { data: document, error: createError } = await supabase
       .from('documents')
       .insert({
@@ -151,13 +264,47 @@ app.post('/api/documents', async (c) => {
       .single()
 
     if (createError) {
-      return c.json({ error: 'Failed to create document' }, 500)
+      console.error('[Documents POST] ❌ Create error:', createError.message)
+      console.error('[Documents POST] Error code:', createError.code)
+      console.error('[Documents POST] Full error:', JSON.stringify(createError))
+      
+      return c.json({ 
+        success: false,
+        error: 'Failed to create document',
+        error_name: createError.name,
+        error_message: createError.message,
+        error_code: createError.code,
+        error_hint: createError.hint,
+        env_check: {
+          hasUrl: !!c.env?.SUPABASE_URL,
+          hasKey: !!c.env?.SUPABASE_ANON_KEY
+        }
+      }, 500)
     }
 
+    console.log('[Documents POST] ✓ Document created:', document.id)
+    console.log('[Documents POST] ========== SUCCESS ==========')
+    
     return c.json({ document })
-  } catch (error) {
-    console.error('Create document error:', error)
-    return c.json({ error: 'Internal server error' }, 500)
+    
+  } catch (error: any) {
+    console.error('[Documents POST] ========== CRITICAL ERROR ==========')
+    console.error('[Documents POST] Error type:', error.constructor?.name)
+    console.error('[Documents POST] Error message:', error.message)
+    console.error('[Documents POST] Error stack:', error.stack)
+    console.error('[Documents POST] ========== END ERROR ==========')
+    
+    return c.json({ 
+      success: false,
+      error: 'Internal server error',
+      error_name: error.name || error.constructor?.name,
+      error_message: error.message,
+      error_stack: error.stack,
+      env_check: {
+        hasUrl: !!c.env?.SUPABASE_URL,
+        hasKey: !!c.env?.SUPABASE_ANON_KEY
+      }
+    }, 500)
   }
 })
 
