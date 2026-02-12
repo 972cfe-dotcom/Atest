@@ -514,18 +514,41 @@ app.get('/api/test-sms', async (c) => {
 // Get user's organizations
 app.get('/api/organizations', async (c) => {
   try {
-    console.log('[Organizations] Fetching user organizations')
+    console.log('[Organizations] ========== START ==========')
+    console.log('[Organizations] Timestamp:', new Date().toISOString())
+    
+    // Debug environment variables
+    console.log('[Organizations] Environment Check:')
+    console.log('[Organizations]   SUPABASE_URL:', c.env?.SUPABASE_URL ? 'Present' : 'Missing')
+    console.log('[Organizations]   SUPABASE_ANON_KEY:', c.env?.SUPABASE_ANON_KEY ? 'Present' : 'Missing')
     
     const authHeader = c.req.header('Authorization')
+    console.log('[Organizations] Authorization header present:', !!authHeader)
+    
     if (!authHeader) {
-      return c.json({ error: 'Unauthorized' }, 401)
+      console.error('[Organizations] ❌ Missing Authorization header')
+      return c.json({ 
+        success: false,
+        error: 'Unauthorized' 
+      }, 401)
     }
     
     const token = authHeader.replace('Bearer ', '')
+    console.log('[Organizations] Token length:', token.length)
+    
     const supabaseUrl = c.env?.SUPABASE_URL || 'https://dmnxblcdaqnenggfyurw.supabase.co'
     const supabaseAnonKey = c.env?.SUPABASE_ANON_KEY || 'missing'
     
+    if (supabaseAnonKey === 'missing') {
+      console.error('[Organizations] ❌ CRITICAL: SUPABASE_ANON_KEY is missing')
+      return c.json({ 
+        success: false,
+        error: 'Configuration error - Missing Supabase credentials'
+      }, 500)
+    }
+    
     // Create Supabase client with user's token for RLS
+    console.log('[Organizations] Creating Supabase client...')
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: {
         headers: {
@@ -534,15 +557,32 @@ app.get('/api/organizations', async (c) => {
       }
     })
     
+    console.log('[Organizations] Verifying user token...')
     const { data: { user }, error: authError } = await supabase.auth.getUser(token)
-    if (authError || !user) {
-      console.error('[Organizations] Auth error:', authError)
-      return c.json({ error: 'Unauthorized' }, 401)
+    
+    if (authError) {
+      console.error('[Organizations] ❌ Auth error:', authError.message)
+      console.error('[Organizations] Auth error details:', JSON.stringify(authError))
+      return c.json({ 
+        success: false,
+        error: 'Unauthorized',
+        details: authError.message 
+      }, 401)
     }
     
-    console.log('[Organizations] User verified:', user.id)
+    if (!user) {
+      console.error('[Organizations] ❌ No user returned from auth')
+      return c.json({ 
+        success: false,
+        error: 'Unauthorized' 
+      }, 401)
+    }
+    
+    console.log('[Organizations] ✓ User verified:', user.id)
+    console.log('[Organizations] User email:', user.email)
     
     // Fetch organizations via organization_members join
+    console.log('[Organizations] Fetching organizations for user...')
     const { data: memberships, error: fetchError } = await supabase
       .from('organization_members')
       .select(`
@@ -557,8 +597,17 @@ app.get('/api/organizations', async (c) => {
       .eq('user_id', user.id)
     
     if (fetchError) {
-      console.error('[Organizations] Fetch error:', fetchError)
-      return c.json({ error: 'Failed to fetch organizations', details: fetchError.message }, 500)
+      console.error('[Organizations] ❌ Fetch error:', fetchError.message)
+      console.error('[Organizations] Error code:', fetchError.code)
+      console.error('[Organizations] Error hint:', fetchError.hint)
+      console.error('[Organizations] Full error:', JSON.stringify(fetchError))
+      return c.json({ 
+        success: false,
+        error: 'Failed to fetch organizations', 
+        details: fetchError.message,
+        code: fetchError.code,
+        hint: fetchError.hint
+      }, 500)
     }
     
     // Transform data to include role
@@ -570,12 +619,29 @@ app.get('/api/organizations', async (c) => {
       role: m.role
     }))
     
-    console.log('[Organizations] Found', organizations.length, 'organizations')
+    console.log('[Organizations] ✓ Found', organizations.length, 'organizations')
+    console.log('[Organizations] ========== SUCCESS ==========')
+    
     return c.json({ organizations })
     
   } catch (error: any) {
-    console.error('[Organizations] Error:', error.message)
-    return c.json({ error: 'Internal server error', details: error.message }, 500)
+    // CRITICAL: Verbose error logging
+    console.error('[Organizations] ========== CRITICAL ERROR ==========')
+    console.error('[Organizations] Error type:', error.constructor.name)
+    console.error('[Organizations] Error message:', error.message)
+    console.error('[Organizations] Error stack:', error.stack)
+    console.error('[Organizations] Error toString:', error.toString())
+    console.error('[Organizations] Full error object:', JSON.stringify(error, Object.getOwnPropertyNames(error)))
+    console.error('[Organizations] ========== END ERROR ==========')
+    
+    return c.json({ 
+      success: false,
+      error: error.message || 'Internal server error',
+      stack: error.stack,
+      details: error.toString(),
+      type: error.constructor.name,
+      full_error: JSON.stringify(error, Object.getOwnPropertyNames(error))
+    }, 500)
   }
 })
 
@@ -583,32 +649,58 @@ app.get('/api/organizations', async (c) => {
 app.post('/api/organizations/create', async (c) => {
   try {
     console.log('[Create Organization] ========== START ==========')
+    console.log('[Create Organization] Timestamp:', new Date().toISOString())
+    
+    // Debug environment variables (CRITICAL - DO NOT LOG ACTUAL VALUES)
+    console.log('[Create Organization] Environment Check:')
+    console.log('[Create Organization]   SUPABASE_URL:', c.env?.SUPABASE_URL ? 'Present' : 'Missing')
+    console.log('[Create Organization]   SUPABASE_ANON_KEY:', c.env?.SUPABASE_ANON_KEY ? 'Present' : 'Missing')
+    console.log('[Create Organization]   Available env keys:', Object.keys(c.env || {}).join(', '))
     
     const authHeader = c.req.header('Authorization')
     console.log('[Create Organization] Authorization header present:', !!authHeader)
     
     if (!authHeader) {
       console.error('[Create Organization] ❌ Missing Authorization header')
-      return c.json({ error: 'Unauthorized - Missing Authorization header' }, 401)
+      return c.json({ 
+        success: false,
+        error: 'Unauthorized - Missing Authorization header' 
+      }, 401)
     }
     
     const body = await c.req.json()
     const { name, tax_id } = body
+    console.log('[Create Organization] Request body received:', { name: !!name, tax_id: !!tax_id })
     
     if (!name || !name.trim()) {
-      return c.json({ error: 'Organization name is required' }, 400)
+      return c.json({ 
+        success: false,
+        error: 'Organization name is required' 
+      }, 400)
     }
     
     const token = authHeader.replace('Bearer ', '')
     console.log('[Create Organization] Token extracted, length:', token.length)
+    console.log('[Create Organization] Token starts with:', token.substring(0, 10) + '...')
     
     const supabaseUrl = c.env?.SUPABASE_URL || 'https://dmnxblcdaqnenggfyurw.supabase.co'
     const supabaseAnonKey = c.env?.SUPABASE_ANON_KEY || 'missing'
     
     console.log('[Create Organization] Supabase URL:', supabaseUrl)
     console.log('[Create Organization] Anon key present:', supabaseAnonKey !== 'missing')
+    console.log('[Create Organization] Anon key length:', supabaseAnonKey !== 'missing' ? supabaseAnonKey.length : 0)
+    
+    if (supabaseAnonKey === 'missing') {
+      console.error('[Create Organization] ❌ CRITICAL: SUPABASE_ANON_KEY is missing from environment')
+      return c.json({ 
+        success: false,
+        error: 'Configuration error - Missing Supabase credentials',
+        details: 'SUPABASE_ANON_KEY not found in environment variables'
+      }, 500)
+    }
     
     // Create Supabase client with user's token for RLS
+    console.log('[Create Organization] Creating Supabase client...')
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: {
         headers: {
@@ -616,22 +708,31 @@ app.post('/api/organizations/create', async (c) => {
         }
       }
     })
+    console.log('[Create Organization] ✓ Supabase client created')
     
     console.log('[Create Organization] Verifying user token...')
     const { data: { user }, error: authError } = await supabase.auth.getUser(token)
     
     if (authError) {
       console.error('[Create Organization] ❌ Auth error:', authError.message)
+      console.error('[Create Organization] Auth error code:', authError.code)
+      console.error('[Create Organization] Auth error status:', authError.status)
       console.error('[Create Organization] Auth error details:', JSON.stringify(authError))
       return c.json({ 
+        success: false,
         error: 'Unauthorized - Invalid token', 
-        details: authError.message 
+        details: authError.message,
+        code: authError.code,
+        status: authError.status
       }, 401)
     }
     
     if (!user) {
       console.error('[Create Organization] ❌ No user returned from auth')
-      return c.json({ error: 'Unauthorized - No user found' }, 401)
+      return c.json({ 
+        success: false,
+        error: 'Unauthorized - No user found' 
+      }, 401)
     }
     
     console.log('[Create Organization] ✓ User verified:', user.id)
@@ -653,11 +754,16 @@ app.post('/api/organizations/create', async (c) => {
     if (orgError) {
       console.error('[Create Organization] ❌ Organization insert error:', orgError.message)
       console.error('[Create Organization] Error code:', orgError.code)
-      console.error('[Create Organization] Error details:', JSON.stringify(orgError))
+      console.error('[Create Organization] Error hint:', orgError.hint)
+      console.error('[Create Organization] Error details:', orgError.details)
+      console.error('[Create Organization] Full error:', JSON.stringify(orgError))
       return c.json({ 
+        success: false,
         error: 'Failed to create organization', 
         details: orgError.message,
-        code: orgError.code 
+        code: orgError.code,
+        hint: orgError.hint,
+        supabase_details: orgError.details
       }, 500)
     }
     
@@ -678,16 +784,21 @@ app.post('/api/organizations/create', async (c) => {
     if (memberError) {
       console.error('[Create Organization] ❌ Member insert error:', memberError.message)
       console.error('[Create Organization] Error code:', memberError.code)
-      console.error('[Create Organization] Error details:', JSON.stringify(memberError))
+      console.error('[Create Organization] Error hint:', memberError.hint)
+      console.error('[Create Organization] Error details:', memberError.details)
+      console.error('[Create Organization] Full error:', JSON.stringify(memberError))
       
       // Try to clean up the organization
       console.log('[Create Organization] Attempting cleanup of organization:', organization.id)
       await supabase.from('organizations').delete().eq('id', organization.id)
       
       return c.json({ 
+        success: false,
         error: 'Failed to add user to organization', 
         details: memberError.message,
-        code: memberError.code 
+        code: memberError.code,
+        hint: memberError.hint,
+        supabase_details: memberError.details
       }, 500)
     }
     
@@ -703,8 +814,23 @@ app.post('/api/organizations/create', async (c) => {
     })
     
   } catch (error: any) {
-    console.error('[Create Organization] Error:', error.message)
-    return c.json({ error: 'Internal server error', details: error.message }, 500)
+    // CRITICAL: Verbose error logging
+    console.error('[Create Organization] ========== CRITICAL ERROR ==========')
+    console.error('[Create Organization] Error type:', error.constructor.name)
+    console.error('[Create Organization] Error message:', error.message)
+    console.error('[Create Organization] Error stack:', error.stack)
+    console.error('[Create Organization] Error toString:', error.toString())
+    console.error('[Create Organization] Full error object:', JSON.stringify(error, Object.getOwnPropertyNames(error)))
+    console.error('[Create Organization] ========== END ERROR ==========')
+    
+    return c.json({ 
+      success: false,
+      error: error.message || 'Internal server error',
+      stack: error.stack,
+      details: error.toString(),
+      type: error.constructor.name,
+      full_error: JSON.stringify(error, Object.getOwnPropertyNames(error))
+    }, 500)
   }
 })
 
