@@ -106,7 +106,20 @@ app.get('/api/documents', async (c) => {
     const token = authHeader.replace('Bearer ', '')
     console.log('[Documents GET] Token length:', token.length)
     
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token)
+    console.log('[Documents GET] Verifying user token...')
+    const { data: authData, error: authError } = await supabase.auth.getUser(token)
+    
+    // CRITICAL: Check for auth data first
+    if (!authData) {
+      console.error('[Documents GET] ❌ No auth data returned')
+      return c.json({ 
+        success: false,
+        error: 'Unauthorized - No auth data',
+        error_message: 'getUser returned null data'
+      }, 401)
+    }
+    
+    const user = authData.user
 
     if (authError) {
       console.error('[Documents GET] ❌ Auth error:', authError.message)
@@ -121,10 +134,21 @@ app.get('/api/documents', async (c) => {
     }
     
     if (!user) {
-      console.error('[Documents GET] ❌ No user returned')
+      console.error('[Documents GET] ❌ No user object in auth data')
       return c.json({ 
         success: false,
-        error: 'Unauthorized' 
+        error: 'Unauthorized - No user',
+        error_message: 'User object is null'
+      }, 401)
+    }
+    
+    if (!user.id) {
+      console.error('[Documents GET] ❌ User object has no ID')
+      console.error('[Documents GET] User object:', JSON.stringify(user))
+      return c.json({ 
+        success: false,
+        error: 'Unauthorized - Invalid user',
+        error_message: 'User object missing ID field'
       }, 401)
     }
     
@@ -705,7 +729,19 @@ app.get('/api/organizations', async (c) => {
     })
     
     console.log('[Organizations] Verifying user token...')
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token)
+    const { data: authData, error: authError } = await supabase.auth.getUser(token)
+    
+    // CRITICAL: Check for auth data first
+    if (!authData) {
+      console.error('[Organizations] ❌ No auth data returned')
+      return c.json({ 
+        success: false,
+        error: 'Unauthorized - No auth data',
+        error_message: 'getUser returned null data'
+      }, 401)
+    }
+    
+    const user = authData.user
     
     if (authError) {
       console.error('[Organizations] ❌ Auth error:', authError.message)
@@ -713,15 +749,27 @@ app.get('/api/organizations', async (c) => {
       return c.json({ 
         success: false,
         error: 'Unauthorized',
+        error_message: authError.message,
         details: authError.message 
       }, 401)
     }
     
     if (!user) {
-      console.error('[Organizations] ❌ No user returned from auth')
+      console.error('[Organizations] ❌ No user object in auth data')
       return c.json({ 
         success: false,
-        error: 'Unauthorized' 
+        error: 'Unauthorized - No user',
+        error_message: 'User object is null'
+      }, 401)
+    }
+    
+    if (!user.id) {
+      console.error('[Organizations] ❌ User object has no ID')
+      console.error('[Organizations] User object:', JSON.stringify(user))
+      return c.json({ 
+        success: false,
+        error: 'Unauthorized - Invalid user',
+        error_message: 'User object missing ID field'
       }, 401)
     }
     
@@ -757,16 +805,28 @@ app.get('/api/organizations', async (c) => {
       }, 500)
     }
     
-    // Transform data to include role
-    const organizations = (memberships || []).map(m => ({
-      id: m.organizations.id,
-      name: m.organizations.name,
-      tax_id: m.organizations.tax_id,
-      created_at: m.organizations.created_at,
-      role: m.role
-    }))
+    // Transform data to include role - SAFE MAPPING with null checks
+    console.log('[Organizations] Mapping memberships to organizations...')
+    console.log('[Organizations] Memberships count:', memberships?.length || 0)
     
-    console.log('[Organizations] ✓ Found', organizations.length, 'organizations')
+    const organizations = (memberships || [])
+      .filter(m => {
+        // Filter out any memberships where organization data is missing
+        if (!m || !m.organizations) {
+          console.warn('[Organizations] ⚠️ Skipping membership with null organization:', m)
+          return false
+        }
+        return true
+      })
+      .map(m => ({
+        id: m.organizations?.id,
+        name: m.organizations?.name,
+        tax_id: m.organizations?.tax_id,
+        created_at: m.organizations?.created_at,
+        role: m.role
+      }))
+    
+    console.log('[Organizations] ✓ Found', organizations.length, 'valid organizations')
     console.log('[Organizations] ========== SUCCESS ==========')
     
     return c.json({ organizations })
@@ -858,7 +918,19 @@ app.post('/api/organizations/create', async (c) => {
     console.log('[Create Organization] ✓ Supabase client created')
     
     console.log('[Create Organization] Verifying user token...')
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token)
+    const { data: authData, error: authError } = await supabase.auth.getUser(token)
+    
+    // CRITICAL: Check for auth data first
+    if (!authData) {
+      console.error('[Create Organization] ❌ No auth data returned')
+      return c.json({ 
+        success: false,
+        error: 'Unauthorized - No auth data',
+        error_message: 'getUser returned null data'
+      }, 401)
+    }
+    
+    const user = authData.user
     
     if (authError) {
       console.error('[Create Organization] ❌ Auth error:', authError.message)
@@ -868,6 +940,7 @@ app.post('/api/organizations/create', async (c) => {
       return c.json({ 
         success: false,
         error: 'Unauthorized - Invalid token', 
+        error_message: authError.message,
         details: authError.message,
         code: authError.code,
         status: authError.status
@@ -875,10 +948,21 @@ app.post('/api/organizations/create', async (c) => {
     }
     
     if (!user) {
-      console.error('[Create Organization] ❌ No user returned from auth')
+      console.error('[Create Organization] ❌ No user object in auth data')
       return c.json({ 
         success: false,
-        error: 'Unauthorized - No user found' 
+        error: 'Unauthorized - No user',
+        error_message: 'User object is null'
+      }, 401)
+    }
+    
+    if (!user.id) {
+      console.error('[Create Organization] ❌ User object has no ID')
+      console.error('[Create Organization] User object:', JSON.stringify(user))
+      return c.json({ 
+        success: false,
+        error: 'Unauthorized - Invalid user',
+        error_message: 'User object missing ID field'
       }, 401)
     }
     
